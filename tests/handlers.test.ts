@@ -62,7 +62,7 @@ describe("formatSessionsList", () => {
 describe("switchToSession", () => {
   it("switchToSession sets session by index", async () => {
     const sessions = ["work", "dev", "my_session"];
-    const mockBridge = { listSessions: vi.fn().mockResolvedValue(sessions.join("\n")) } as any;
+    const mockBridge = { listSessionNames: vi.fn().mockResolvedValue(sessions) } as any;
     const mockConfig = { tmuxTarget: { session: "config_default", window: 0, pane: 0 } } as any;
     const mockCurrentSession = { get: vi.fn().mockResolvedValue(null), set: vi.fn() } as any;
     const mockCtx = { reply: vi.fn() } as any;
@@ -76,7 +76,7 @@ describe("switchToSession", () => {
 
   it("switchToSession handles out of range index", async () => {
     const sessions = ["work", "dev"];
-    const mockBridge = { listSessions: vi.fn().mockResolvedValue(sessions.join("\n")) } as any;
+    const mockBridge = { listSessionNames: vi.fn().mockResolvedValue(sessions) } as any;
     const mockConfig = { tmuxTarget: { session: "config_default", window: 0, pane: 0 } } as any;
     const mockCurrentSession = { get: vi.fn().mockResolvedValue(null), set: vi.fn() } as any;
     const mockCtx = { reply: vi.fn() } as any;

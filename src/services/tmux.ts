@@ -49,8 +49,17 @@ export class TmuxBridge {
     return result.stdout.trim();
   }
 
+  async listSessionNames(): Promise<string[]> {
+    const result = await this.execFile("tmux", ["list-sessions"]);
+    return result.stdout
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((s) => s.split(":")[0]!);
+  }
+
   async sessionExists(name: string): Promise<boolean> {
-    const sessions = await this.listSessions();
-    return sessions.split("\n").some((line) => line.startsWith(`${name}:`));
+    const sessions = await this.listSessionNames();
+    return sessions.includes(name);
   }
 }

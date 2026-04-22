@@ -65,13 +65,12 @@ async function switchToDir(ctx: any, idx: number, deps: HandlerDeps): Promise<vo
 
 export async function switchToSession(ctx: any, idx: number, deps: HandlerDeps): Promise<void> {
   try {
-    const output = await deps.bridge.listSessions();
-    const sessions = output.split("\n").map(s => s.trim()).filter(Boolean);
+    const sessions = await deps.bridge.listSessionNames();
     if (idx < 0 || idx >= sessions.length) {
       await safeReply(ctx, `Index out of range (1–${sessions.length}).`);
       return;
     }
-    const sessionName = sessions[idx].split(":")[0]!;
+    const sessionName = sessions[idx]!;
     await deps.currentSessionManager.set(sessionName);
     await safeReply(ctx, `✅ Switched to ${sessionName}`);
   } catch (err) {
@@ -267,9 +266,9 @@ export function formatSessionsList(sessions: string[], current: string | null): 
   if (sessions.length === 0) return "No tmux sessions running.";
 
   const currentIdx = current ? sessions.indexOf(current) : -1;
-  const sorted = current && currentIdx > 0
-    ? [sessions[currentIdx], ...sessions.filter((_, i) => i !== currentIdx)]
-    : sessions;
+  const prepend = current && currentIdx > 0 ? sessions[currentIdx] : null;
+  const rest = prepend ? sessions.filter((_, i) => i !== currentIdx) : sessions;
+  const sorted = prepend ? [prepend, ...rest] : sessions;
 
   const lines = sorted.map((s, i) => {
     const marker = s === current ? "  ✅" : "   ";
@@ -376,8 +375,7 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
 
   bot.command("sessions", async (ctx) => {
     try {
-      const output = await deps.bridge.listSessions();
-      const sessions = output.split("\n").map(s => s.trim()).filter(Boolean);
+      const sessions = await deps.bridge.listSessionNames();
       const current = await deps.currentSessionManager.get();
       const body = formatSessionsList(sessions, current);
       await safeReply(ctx, `🖥️ tmux sessions:\n\n${body}`);
