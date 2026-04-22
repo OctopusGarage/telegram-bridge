@@ -16,26 +16,23 @@
 | `/new [session]` | `/new` + Enter | ✅ |
 | `/startup [session]` | `claude-stella --channels plugin:telegram@claude-plugins-official` + Enter | ✅ |
 | `/startup_continue [session]` | `claude-stella --channels plugin:telegram@claude-plugins-official --continue` + Enter | ✅ |
-| `/run [session] <cmd>` | Whitelisted command + Enter | ✅ |
+| `/run <cmd>` | `claude-<name>` (no extra args) + Enter | - |
+| `/cwd <path>` | `cd <path> && pwd` + Enter (restricted to allowed roots) | - |
+| `/list_recent_workdir` | None (replies with numbered list + /switch_<n>) | - |
+| `/switch_<n>` | `cd <dir[n]> && pwd` + Enter (from recent list) | - |
 | `/sessions` | None (lists all tmux sessions) | - |
 
 ## Text (no `/` prefix)
 
 | Message received | Sent to tmux | Note |
 |------------------|--------------|------|
-| `claude-stella ...` | `claude-stella ...` + Enter | Whitelisted |
-| Any other text | None | Replies with usage |
+| `claude-<name>` | `claude-<name>` + Enter | Whitelisted, no args |
 
 ## Whitelist (governs `/run` and text commands)
 
 | Pattern | Matches |
 |---------|---------|
-| `/esc` | `/esc` |
-| `/exit` | `/exit` |
-| `/new` | `/new` |
-| `/clear` | `/clear` |
-| `/status` | `/status` |
-| `claude(?:-[a-z]+)?\b` | `claude-stella`, `claude-code`, etc. |
+| `claude(?:-[a-z]+)?$` | `claude-stella`, `claude-code` (no extra args) |
 
 ## Additional Notes
 
@@ -45,3 +42,4 @@
 - User rate limit: `RATE_LIMIT_MS` env var (default 2000ms)
 - User allowlist: `ALLOWED_USER_IDS` env var (empty = no restriction)
 - Startup command: `CLAUDE_STARTUP_COMMAND` env var (default `claude-stella --channels plugin:telegram@claude-plugins-official`)
+- `/cwd` allowed roots: `ALLOWED_CWD_ROOTS` env var (comma-separated, e.g. `~/programming,~/code`)

@@ -15,10 +15,11 @@ const envSchema = z.object({
   MAX_POLL_TICKS: z.coerce.number().int().positive().default(20),
   HTTP_PROXY: z.string().url().optional(),
   HTTPS_PROXY: z.string().url().optional(),
-  ALLOWED_USER_IDS: z.string().default(""),  // comma-separated Telegram user IDs
+  ALLOWED_USER_IDS: z.string().default(""),
   MAX_COMMAND_LENGTH: z.coerce.number().int().positive().default(5000),
   RATE_LIMIT_MS: z.coerce.number().int().positive().default(2000),
   CLAUDE_STARTUP_COMMAND: z.string().min(1),
+  ALLOWED_CWD_ROOTS: z.string().default(""),
 });
 
 const intOr = (v: unknown, fallback: number): number => {
@@ -50,5 +51,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     maxCommandLength: parsed.MAX_COMMAND_LENGTH,
     rateLimitMs: parsed.RATE_LIMIT_MS,
     claudeStartupCommand: parsed.CLAUDE_STARTUP_COMMAND,
+    allowedCwdRoots: parsed.ALLOWED_CWD_ROOTS
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
   };
 }

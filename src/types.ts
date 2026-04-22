@@ -16,6 +16,7 @@ export type AppConfig = {
   maxCommandLength: number;
   rateLimitMs: number;
   claudeStartupCommand: string;
+  allowedCwdRoots: string[];  // Allowed directories for /cwd command (e.g. ["~/programming"])
 };
 
 export type ExecResult = {
