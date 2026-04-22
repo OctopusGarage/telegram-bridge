@@ -18,10 +18,11 @@
 | `/startup_continue [session]` | `claude-stella --channels plugin:telegram@claude-plugins-official --continue` + Enter | ✅ |
 | `/run <cmd>` | `claude-<name>` (no extra args) + Enter | - |
 | `/cwd <path>` | `cd <path> && pwd` + Enter (restricted to allowed roots) | - |
-| `/list_recent_workdir` | None (replies with numbered list + /switch_<n>) | - |
-| `/switch <n>` | Switches tmux session by number (persisted to `.current_tmux_session`) | - |
-| `/switch_<n>` | `cd <dir[n]> && pwd` + Enter (from recent list) | - |
+| `/list_recent_workdir` | None (replies with numbered list + /cwd_<n>) | - |
+| `/attach <n>` | Switches tmux session by number (persisted to `.current_tmux_session`) | - |
+| `/cwd_<n>` | `cd <dir[n]> && pwd` + Enter (from recent list) | - |
 | `/sessions` | None (lists numbered sessions, current pinned with ✅) | - |
+| `/attach_<n>` | Switches tmux session by number | - |
 
 ## Text (no `/` prefix)
 

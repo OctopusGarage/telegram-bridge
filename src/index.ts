@@ -102,15 +102,18 @@ async function createResilientFetch(proxyUrl?: string) {
   return fetchWithRetry;
 }
 
-const resilientFetch = await createResilientFetch(config.proxyUrl);
+const { HttpsProxyAgent } = await import("https-proxy-agent");
+const proxyAgent = new HttpsProxyAgent(config.proxyUrl);
 
-type BotConfig = ConstructorParameters<typeof Bot>[1];
-const botConfig: BotConfig = {
-  // @ts-expect-error — gramjs types don't expose fetch in BotConfig but it works at runtime
-  fetch: resilientFetch,
-};
-
-const bot = new Bot(config.botToken, botConfig);
+// Strip signal to avoid AbortSignal conflict between gramjs internal signal and undici dispatcher
+const bot = new Bot(config.botToken, {
+  client: {
+    fetch: (url, init) => {
+      const { signal: _signal, ...rest } = init || {};
+      return fetch(url, { ...rest, dispatcher: proxyAgent } as RequestInit);
+    },
+  },
+});
 
 // Apply user allowlist + rate limit middleware
 bot.use(buildMiddleware(config));
@@ -121,6 +124,14 @@ bot.catch((err) => {
 });
 
 registerHandlers(bot, { bridge, config, currentSessionManager });
+
+// Register bot commands once — Telegram persists them across restarts
+try {
+  await bot.api.setMyCommands(BOT_COMMANDS, { scope: { type: "all_private_chats" } });
+  console.log(`[bot] Registered ${BOT_COMMANDS.length} commands to Telegram`);
+} catch (err) {
+  console.error("[bot] setMyCommands failed:", errMessage(err));
+}
 
 // Guard against duplicate signals calling stop() twice
 let stopping = false;
@@ -143,42 +154,13 @@ process.once("SIGTERM", () => void stop("SIGTERM"));
 // Catch-all: never let uncaught errors crash the process
 process.on("uncaughtException", (err) => {
   console.error(`[fatal] uncaughtException: ${errMessage(err)}`);
-  // Don't exit — bot should continue running
 });
 
 process.on("unhandledRejection", (reason) => {
   console.error(`[fatal] unhandledRejection: ${errMessage(reason)}`);
-  // Don't exit — bot should continue running
 });
 
-// Start with infinite retry — never crash, retry forever with exponential backoff capped at 30min
-const START_INITIAL_DELAY_MS = 1000;
-const START_MAX_DELAY_MS = 30 * 60 * 1000;
-
-// Register bot commands once — Telegram persists them across restarts
-try {
-  await bot.api.setMyCommands(BOT_COMMANDS, { scope: { type: "all_private_chats" } });
-  console.log(`[bot] Registered ${BOT_COMMANDS.length} commands to Telegram`);
-} catch (err) {
-  console.error("[bot] setMyCommands failed:", errMessage(err));
-}
-
-async function startWithRetry(): Promise<void> {
-  let delay = START_INITIAL_DELAY_MS;
-  while (true) {
-    try {
-      console.log("[bot] Starting...");
-      await bot.start();
-      console.log("[bot] Bot stopped gracefully");
-      return; // graceful stop — exit cleanly
-    } catch (err) {
-      const msg = err instanceof Error ? (err.message || String(err)) : String(err);
-      console.error(`[bot] Start failed: ${msg}. Retrying in ${Math.round(delay / 1000)}s...`);
-      await sleep(delay);
-      delay = Math.min(delay * 2, START_MAX_DELAY_MS);
-    }
-  }
-}
-
-await startWithRetry();
+console.log("[bot] Starting...");
+await bot.start();
+console.log("[bot] Bot stopped gracefully");
 process.exit(0);

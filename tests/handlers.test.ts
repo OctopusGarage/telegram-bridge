@@ -49,8 +49,8 @@ describe("formatSessionsList", () => {
     const output = formatSessionsList(sessions, "my_session");
     expect(output).toContain("✅");
     expect(output).toContain("my_session");
-    expect(output).toContain("/switch_1");
-    expect(output).toContain("/switch_3");
+    expect(output).toContain("/attach_1");
+    expect(output).toContain("/attach_3");
   });
 
   it("formatSessionsList returns 'No tmux sessions' for empty", () => {

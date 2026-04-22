@@ -71,7 +71,7 @@ export async function switchToSession(ctx: any, idx: number, deps: HandlerDeps):
       await safeReply(ctx, `Index out of range (1–${sessions.length}).`);
       return;
     }
-    const sessionName = sessions[idx];
+    const sessionName = sessions[idx].split(":")[0]!;
     await deps.currentSessionManager.set(sessionName);
     await safeReply(ctx, `✅ Switched to ${sessionName}`);
   } catch (err) {
@@ -95,7 +95,7 @@ export const BOT_COMMANDS: BotCommand[] = [
   { command: "run", description: "Send claude-* command to tmux" },
   { command: "cwd", description: "Change tmux working directory" },
   { command: "list_recent_workdir", description: "List recent working directories" },
-  { command: "switch", description: "Switch to recent directory by number" },
+  { command: "attach", description: "Switch tmux session by number" },
   { command: "sessions", description: "List tmux sessions" },
 ];
 
@@ -273,10 +273,10 @@ export function formatSessionsList(sessions: string[], current: string | null): 
 
   const lines = sorted.map((s, i) => {
     const marker = s === current ? "  ✅" : "   ";
-    return `${i + 1}.${marker} ${s}`;
+    return `${i + 1}.${marker} ${s}\n/attach_${i + 1}`;
   });
 
-  return `📌 Current: ${current ?? "(none)"}\n\n${lines.join("\n")}\n\n/switch_1 ~ /switch_${sessions.length}`;
+  return `📌 Current: ${current ?? "(none)"}\n\n${lines.join("\n\n")}`;
 }
 
 export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
@@ -295,10 +295,10 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
       `/startup_continue [session] — ${deps.config.claudeStartupCommand} --continue\n` +
       "/run <cmd> — send claude-<name> command (no extra args)\n" +
       "/cwd <path> — cd to path (allowed: " + deps.config.allowedCwdRoots.join(" · ") + ")\n" +
-      "/list_recent_workdir — show recent directories with /switch_<n>\n" +
-      "/switch_<n> — cd to recent directory by number\n" +
-      "/sessions — list tmux sessions with /switch <n> shortcuts\n" +
-      "/switch <n> — switch tmux session by number\n\n" +
+      "/list_recent_workdir — show recent directories with /cwd_<n>\n" +
+      "/cwd_<n> — cd to recent directory by number\n" +
+      "/sessions — list tmux sessions\n" +
+      "/attach <n> — attach to tmux session by number\n\n" +
       "session is optional — defaults to saved session from .current_tmux_session\n" +
       "run /sessions to see available sessions"
     );
@@ -386,6 +386,18 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
     }
   });
 
+  // Handler for /attach N — switches tmux session by index
+  bot.command("attach", async (ctx) => {
+    const raw = (ctx.match as string)?.trim() ?? "";
+    const match = raw.match(/^(\d+)$/);
+    if (!match) {
+      await safeReply(ctx, "Usage: /attach <n>\ne.g. /attach 1\n\nUse /sessions to see available session numbers.");
+      return;
+    }
+    const idx = parseInt(match[1]!, 10) - 1;
+    await switchToSession(ctx, idx, deps);
+  });
+
   bot.command("list_recent_workdir", async (ctx) => {
     const lines = readRecentWorkdirLines();
     if (lines.length === 0) {
@@ -394,22 +406,10 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
     }
 
     const msg = lines
-      .map((dir, i) => `${i + 1}. ${dir}\n/switch_${i + 1}`)
+      .map((dir, i) => `${i + 1}. ${dir}\n/cwd_${i + 1}`)
       .join("\n\n");
 
     await safeReply(ctx, `📁 Recent directories:\n\n${msg}`);
-  });
-
-  // Handler for /switch N (with space) — switches tmux session
-  bot.command("switch", async (ctx) => {
-    const raw = (ctx.match as string)?.trim() ?? "";
-    const match = raw.match(/^(\d+)$/);
-    if (!match) {
-      await safeReply(ctx, "Usage: /switch <n>\ne.g. /switch 1\n\nUse /sessions to see available session numbers.");
-      return;
-    }
-    const idx = parseInt(match[1]!, 10) - 1;
-    await switchToSession(ctx, idx, deps);
   });
 
   bot.command("cwd", async (ctx) => {
@@ -463,10 +463,17 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
   bot.on("message:text", async (ctx) => {
     const text = ctx.message.text;
 
-    const switchMatch = text.match(/^\/switch_(\d+)(?:\s|$)/);
-    if (switchMatch) {
-      const idx = parseInt(switchMatch[1]!, 10) - 1;
+    const cwdMatch = text.match(/^\/cwd_(\d+)(?:\s|$)/);
+    if (cwdMatch) {
+      const idx = parseInt(cwdMatch[1]!, 10) - 1;
       await switchToDir(ctx, idx, deps);
+      return;
+    }
+
+    const attachMatch = text.match(/^\/attach_(\d+)(?:\s|$)/);
+    if (attachMatch) {
+      const idx = parseInt(attachMatch[1]!, 10) - 1;
+      await switchToSession(ctx, idx, deps);
       return;
     }
 
