@@ -5,6 +5,12 @@ import { TmuxBridge } from "../services/tmux.js";
 import { CurrentSessionManager } from "../services/currentSession.js";
 import type { AppConfig, BotCommand } from "../types.js";
 import { validateCommand } from "../security.js";
+import { sessionShortId } from "../utils/hash.js";
+
+/** Resolve a session name from a short hash (6-char base62) */
+function resolveSessionByShortId(sessions: string[], shortId: string): string | null {
+  return sessions.find((s) => sessionShortId(s) === shortId) ?? null;
+}
 
 const RATE_LIMIT_CLEANUP_INTERVAL_MS = 60_000;
 const RATE_LIMIT_CLEANUP_THRESHOLD_MS = 20_000;
@@ -63,20 +69,28 @@ async function switchToDir(ctx: any, idx: number, deps: HandlerDeps): Promise<vo
   }
 }
 
-export async function switchToSession(ctx: any, idx: number, deps: HandlerDeps): Promise<void> {
+export async function switchToSession(ctx: any, idOrIdx: string | number, deps: HandlerDeps): Promise<void> {
   try {
     const sessions = await deps.bridge.listSessionNames();
-    const current = await deps.currentSessionManager.get();
-    const currentIdx = current ? sessions.indexOf(current) : -1;
-    const prepend = current && currentIdx > 0 ? sessions[currentIdx] : null;
-    const rest = prepend ? sessions.filter((_, i) => i !== currentIdx) : sessions;
-    const sorted = prepend ? [prepend, ...rest] : sessions;
+    let sessionName: string | null = null;
 
-    if (idx < 0 || idx >= sorted.length) {
-      await safeReply(ctx, `Index out of range (1–${sorted.length}).`);
+    if (typeof idOrIdx === "string" && /^[a-zA-Z0-9]{6}$/.test(idOrIdx)) {
+      sessionName = resolveSessionByShortId(sessions, idOrIdx);
+    } else if (typeof idOrIdx === "number") {
+      const current = await deps.currentSessionManager.get();
+      const currentIdx = current ? sessions.indexOf(current) : -1;
+      const prepend = current && currentIdx > 0 ? sessions[currentIdx] : null;
+      const rest = prepend ? sessions.filter((_, i) => i !== currentIdx) : sessions;
+      const sorted = prepend ? [prepend, ...rest] : sessions;
+      if (idOrIdx >= 0 && idOrIdx < sorted.length) {
+        sessionName = sorted[idOrIdx]!;
+      }
+    }
+
+    if (!sessionName) {
+      await safeReply(ctx, `Session not found for \`${idOrIdx}\`.`);
       return;
     }
-    const sessionName = sorted[idx]!;
     await deps.currentSessionManager.set(sessionName);
     await safeReply(ctx, `✅ Switched to ${sessionName}`);
   } catch (err) {
@@ -84,20 +98,28 @@ export async function switchToSession(ctx: any, idx: number, deps: HandlerDeps):
   }
 }
 
-export async function removeSession(ctx: any, idx: number, deps: HandlerDeps): Promise<void> {
+export async function removeSession(ctx: any, idOrIdx: string | number, deps: HandlerDeps): Promise<void> {
   try {
     const sessions = await deps.bridge.listSessionNames();
-    const current = await deps.currentSessionManager.get();
-    const currentIdx = current ? sessions.indexOf(current) : -1;
-    const prepend = current && currentIdx > 0 ? sessions[currentIdx] : null;
-    const rest = prepend ? sessions.filter((_, i) => i !== currentIdx) : sessions;
-    const sorted = prepend ? [prepend, ...rest] : sessions;
+    let sessionName: string | null = null;
 
-    if (idx < 0 || idx >= sorted.length) {
-      await safeReply(ctx, `Index out of range (1–${sorted.length}).`);
+    if (typeof idOrIdx === "string" && /^[a-zA-Z0-9]{6}$/.test(idOrIdx)) {
+      sessionName = resolveSessionByShortId(sessions, idOrIdx);
+    } else if (typeof idOrIdx === "number") {
+      const current = await deps.currentSessionManager.get();
+      const currentIdx = current ? sessions.indexOf(current) : -1;
+      const prepend = current && currentIdx > 0 ? sessions[currentIdx] : null;
+      const rest = prepend ? sessions.filter((_, i) => i !== currentIdx) : sessions;
+      const sorted = prepend ? [prepend, ...rest] : sessions;
+      if (idOrIdx >= 0 && idOrIdx < sorted.length) {
+        sessionName = sorted[idOrIdx]!;
+      }
+    }
+
+    if (!sessionName) {
+      await safeReply(ctx, `Session not found for \`${idOrIdx}\`.`);
       return;
     }
-    const sessionName = sorted[idx]!;
     await deps.bridge.killSession(sessionName);
     await safeReply(ctx, `✅ Removed session ${sessionName}`);
   } catch (err) {
@@ -200,14 +222,21 @@ export async function resolveHandlerContext(arg: string | null, deps: HandlerDep
 
   // Only read saved session from file when no explicit arg provided
   const savedSession = effectiveArg === null ? await deps.currentSessionManager.get() : null;
-  const session = effectiveArg ?? savedSession ?? deps.config.tmuxTarget.session;
+  let session = effectiveArg ?? savedSession ?? deps.config.tmuxTarget.session;
 
   if (!session) {
     throw new Error("No session specified. Run /sessions to see available sessions.");
   }
 
-  if (session !== deps.config.tmuxTarget.session && !(await deps.bridge.sessionExists(session))) {
-    throw new Error(`Session '${session}' does not exist`);
+  // Auto-fallback: if saved session no longer exists, use default
+  if (!(await deps.bridge.sessionExists(session))) {
+    const defaultSession = deps.config.tmuxTarget.session;
+    if (defaultSession && await deps.bridge.sessionExists(defaultSession)) {
+      console.warn(`[handlers] Saved session '${session}' not found, falling back to '${defaultSession}'`);
+      session = defaultSession;
+    } else {
+      throw new Error(`Session '${session}' does not exist`);
+    }
   }
 
   return {
@@ -298,9 +327,10 @@ export function formatSessionsList(sessions: string[], current: string | null): 
   const rest = prepend ? sessions.filter((_, i) => i !== currentIdx) : sessions;
   const sorted = prepend ? [prepend, ...rest] : sessions;
 
-  const lines = sorted.map((s, i) => {
+  const lines = sorted.map((s) => {
     const marker = s === current ? "  ✅" : "   ";
-    return `${i + 1}.${marker} ${s}\n/attach_${i + 1}  /remove_${i + 1}`;
+    const sid = sessionShortId(s);
+    return `${marker} ${s}\n   /attach_${sid}  /remove_${sid}`;
   });
 
   return `📌 Current: ${current ?? "(none)"}\n\n${lines.join("\n\n")}`;
@@ -325,10 +355,10 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
       "/list_recent_workdir — show recent directories with /cwd_<n>\n" +
       "/cwd_<n> — cd to recent directory by number\n" +
       "/sessions — list tmux sessions\n" +
-      "/attach <n> — attach to tmux session by number\n" +
-      "/remove <n> — remove tmux session by number\n\n" +
+      "/attach <hash> — attach to tmux session by short hash\n" +
+      "/remove <hash> — remove tmux session by short hash\n\n" +
       "session is optional — defaults to saved session from .current_tmux_session\n" +
-      "run /sessions to see available sessions"
+      "run /sessions to see available hashes"
     );
   });
 
@@ -413,28 +443,39 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
     }
   });
 
-  // Handler for /attach N — switches tmux session by index
+  // Handler for /attach <hash|n> — switches tmux session by short hash or legacy index
   bot.command("attach", async (ctx) => {
     const raw = (ctx.match as string)?.trim() ?? "";
-    const match = raw.match(/^(\d+)$/);
-    if (!match) {
-      await safeReply(ctx, "Usage: /attach <n>\ne.g. /attach 1\n\nUse /sessions to see available session numbers.");
+    if (!raw) {
+      await safeReply(ctx, "Usage: /attach <hash>\ne.g. /attach abc123\n\nUse /sessions to see available hashes.");
       return;
     }
-    const idx = parseInt(match[1]!, 10) - 1;
-    await switchToSession(ctx, idx, deps);
+    // Support both short hash (6-char base62) and legacy numeric index
+    if (/^[a-zA-Z0-9]{6}$/.test(raw)) {
+      await switchToSession(ctx, raw, deps);
+    } else if (/^\d+$/.test(raw)) {
+      const idx = parseInt(raw, 10) - 1;
+      await switchToSession(ctx, idx, deps);
+    } else {
+      await safeReply(ctx, "Invalid session id. Use /sessions to see available hashes.");
+    }
   });
 
-  // Handler for /remove N — kills tmux session by index
+  // Handler for /remove <hash|n> — kills tmux session by short hash or legacy index
   bot.command("remove", async (ctx) => {
     const raw = (ctx.match as string)?.trim() ?? "";
-    const match = raw.match(/^(\d+)$/);
-    if (!match) {
-      await safeReply(ctx, "Usage: /remove <n>\ne.g. /remove 1\n\nUse /sessions to see available session numbers.");
+    if (!raw) {
+      await safeReply(ctx, "Usage: /remove <hash>\ne.g. /remove abc123\n\nUse /sessions to see available hashes.");
       return;
     }
-    const idx = parseInt(match[1]!, 10) - 1;
-    await removeSession(ctx, idx, deps);
+    if (/^[a-zA-Z0-9]{6}$/.test(raw)) {
+      await removeSession(ctx, raw, deps);
+    } else if (/^\d+$/.test(raw)) {
+      const idx = parseInt(raw, 10) - 1;
+      await removeSession(ctx, idx, deps);
+    } else {
+      await safeReply(ctx, "Invalid session id. Use /sessions to see available hashes.");
+    }
   });
 
   bot.command("list_recent_workdir", async (ctx) => {
@@ -509,17 +550,25 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
       return;
     }
 
-    const attachMatch = text.match(/^\/attach_(\d+)(?:\s|$)/);
+    const attachMatch = text.match(/^\/attach_([a-zA-Z0-9]+)(?:\s|$)/);
     if (attachMatch) {
-      const idx = parseInt(attachMatch[1]!, 10) - 1;
-      await switchToSession(ctx, idx, deps);
+      const raw = attachMatch[1]!;
+      if (/^[a-zA-Z0-9]{6}$/.test(raw)) {
+        await switchToSession(ctx, raw, deps);
+      } else if (/^\d+$/.test(raw)) {
+        await switchToSession(ctx, parseInt(raw, 10) - 1, deps);
+      }
       return;
     }
 
-    const removeMatch = text.match(/^\/remove_(\d+)(?:\s|$)/);
+    const removeMatch = text.match(/^\/remove_([a-zA-Z0-9]+)(?:\s|$)/);
     if (removeMatch) {
-      const idx = parseInt(removeMatch[1]!, 10) - 1;
-      await removeSession(ctx, idx, deps);
+      const raw = removeMatch[1]!;
+      if (/^[a-zA-Z0-9]{6}$/.test(raw)) {
+        await removeSession(ctx, raw, deps);
+      } else if (/^\d+$/.test(raw)) {
+        await removeSession(ctx, parseInt(raw, 10) - 1, deps);
+      }
       return;
     }
 

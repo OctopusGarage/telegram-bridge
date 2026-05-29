@@ -5,3 +5,4 @@ coverage
 recent_workdir.txt
 docs/superpowers
 .current_tmux_session
+logs/
