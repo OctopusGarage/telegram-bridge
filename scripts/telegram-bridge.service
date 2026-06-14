@@ -1,0 +1,15 @@
+[Unit]
+Description=telegram-bridge bot
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=__PROJECT_DIR__
+ExecStart=__PROJECT_DIR__/scripts/telegram-bridge-runner.sh
+Restart=always
+RestartSec=10
+StandardOutput=append:__PROJECT_DIR__/logs/launchd.out.log
+StandardError=append:__PROJECT_DIR__/logs/launchd.err.log
+
+[Install]
+WantedBy=default.target

@@ -1,8 +1,10 @@
 import { config as loadEnv } from "dotenv";
 import { z } from "zod";
 import type { AppConfig } from "./types.js";
+import { expandTilde } from "./utils/path.js";
 
-loadEnv();
+const envPath = process.env.TGB_ENV_FILE?.trim();
+loadEnv(envPath ? { path: envPath } : {});
 
 const envSchema = z.object({
   BOT_TOKEN: z.string().min(1),
@@ -15,9 +17,13 @@ const envSchema = z.object({
   MAX_POLL_TICKS: z.coerce.number().int().positive().default(20),
   HTTP_PROXY: z.preprocess((v) => (v === "" ? undefined : v), z.string().optional()),
   HTTPS_PROXY: z.preprocess((v) => (v === "" ? undefined : v), z.string().optional()),
+  MAX_QUEUE_SIZE: z.coerce.number().int().positive().default(30),
+  MAX_CONCURRENT_SESSIONS: z.coerce.number().int().positive().default(3),
   ALLOWED_USER_IDS: z.string().default(""),
   MAX_COMMAND_LENGTH: z.coerce.number().int().positive().default(5000),
   RATE_LIMIT_MS: z.coerce.number().int().positive().default(2000),
+  SESSION_RATE_LIMIT_MS: z.coerce.number().int().positive().default(1200),
+  GLOBAL_RATE_LIMIT_MS: z.coerce.number().int().positive().default(500),
   CLAUDE_STARTUP_COMMAND: z.string().min(1),
   ALLOWED_CWD_ROOTS: z.string().default(""),
 });
@@ -50,10 +56,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ),
     maxCommandLength: parsed.MAX_COMMAND_LENGTH,
     rateLimitMs: parsed.RATE_LIMIT_MS,
+    sessionRateLimitMs: parsed.SESSION_RATE_LIMIT_MS,
+    globalRateLimitMs: parsed.GLOBAL_RATE_LIMIT_MS,
+    maxConcurrentSessions: parsed.MAX_CONCURRENT_SESSIONS,
+    maxQueueSize: parsed.MAX_QUEUE_SIZE,
     claudeStartupCommand: parsed.CLAUDE_STARTUP_COMMAND,
     allowedCwdRoots: parsed.ALLOWED_CWD_ROOTS
       .split(",")
       .map((s) => s.trim())
-      .filter(Boolean),
+      .map(expandTilde)
+      .filter(Boolean)
+      .filter((value, index, arr) => arr.indexOf(value) === index),
   };
 }

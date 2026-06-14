@@ -15,8 +15,12 @@ export type AppConfig = {
   allowedUserIds: Set<string>;  // Telegram user IDs with access
   maxCommandLength: number;
   rateLimitMs: number;
+  sessionRateLimitMs: number;
+  globalRateLimitMs: number;
+  maxConcurrentSessions: number;
   claudeStartupCommand: string;
   allowedCwdRoots: string[];  // Allowed directories for /cwd command (e.g. ["~/programming"])
+  maxQueueSize: number;
 };
 
 export type ExecResult = {

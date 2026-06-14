@@ -17,30 +17,37 @@ export class TmuxBridge {
     this.target = options.target;
   }
 
-  private formatTarget(): string {
-    const { session, window, pane } = this.target;
+  private formatTarget(sessionName?: string): string {
+    const session = sessionName ?? this.target.session;
+    const { window, pane } = this.target;
     return `${session}:${window}.${pane}`;
   }
 
-  async ensurePaneExists(): Promise<void> {
-    const result = await this.execFile("tmux", ["list-panes", "-t", this.formatTarget(), "-F", "#{pane_id}"]);
+  async ensurePaneExists(sessionName?: string): Promise<void> {
+    const result = await this.execFile("tmux", ["list-panes", "-t", this.formatTarget(sessionName), "-F", "#{pane_id}"]);
 
     if (result.stdout.trim().length === 0) {
       throw new Error(`tmux pane not found: ${this.formatTarget()}`);
     }
   }
 
-  async sendCommand(command: string): Promise<void> {
-    await this.execFile("tmux", ["send-keys", "-t", this.formatTarget(), command, "C-m"]);
+  async sendCommand(command: string, sessionName?: string): Promise<void> {
+    await this.execFile("tmux", ["send-keys", "-t", this.formatTarget(sessionName), command, "C-m"]);
   }
 
   // Send tmux key bindings directly (e.g. "C-c", "C-l", "Escape", "C-b")
-  async sendRawKey(key: string): Promise<void> {
-    await this.execFile("tmux", ["send-keys", "-t", this.formatTarget(), key]);
+  async sendRawKey(key: string, sessionName?: string): Promise<void> {
+    await this.execFile("tmux", ["send-keys", "-t", this.formatTarget(sessionName), key]);
   }
 
-  async capturePane(): Promise<string> {
-    const result = await this.execFile("tmux", ["capture-pane", "-p", "-J", "-t", this.formatTarget()]);
+  async capturePane(sessionName?: string): Promise<string> {
+    const result = await this.execFile("tmux", [
+      "capture-pane",
+      "-p",
+      "-J",
+      "-t",
+      this.formatTarget(sessionName),
+    ]);
     return result.stdout;
   }
 
