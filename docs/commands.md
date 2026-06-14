@@ -20,9 +20,11 @@
 | `/cwd <path>` | `cd <path> && pwd` + Enter (restricted to allowed roots) | - |
 | `/list_recent_workdir` | None (replies with numbered list + /cwd_<n>) | - |
 | `/attach <n>` | Switches tmux session by number (persisted to `.current_tmux_session`) | - |
+| `/remove <n>` | Removes tmux session by number | - |
 | `/cwd_<n>` | `cd <dir[n]> && pwd` + Enter (from recent list) | - |
 | `/sessions` | None (lists numbered sessions, current pinned with ✅) | - |
 | `/attach_<n>` | Switches tmux session by number | - |
+| `/remove_<n>` | Removes tmux session by number | - |
 
 ## Text (no `/` prefix)
 

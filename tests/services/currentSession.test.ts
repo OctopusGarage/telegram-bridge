@@ -46,6 +46,15 @@ describe("CurrentSessionManager", () => {
     expect(fs.existsSync(TEST_FILE)).toBe(false);
   });
 
+  it("set updates cached value without second disk read", async () => {
+    const mgr = new CurrentSessionManager(TEST_DIR);
+    await mgr.set("session_a");
+    fs.writeFileSync(TEST_FILE, "tampered", "utf-8");
+
+    const result = await mgr.get();
+    expect(result).toBe("session_a");
+  });
+
   it("set updates cache and file", async () => {
     const mgr = new CurrentSessionManager(TEST_DIR);
     await mgr.set("session_a");

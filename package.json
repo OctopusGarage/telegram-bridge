@@ -9,7 +9,17 @@
     "start": "node dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint:types": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.tests.json"
+    "lint:types": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.tests.json",
+    "release": "scripts/release.sh",
+    "release:package": "scripts/release-package.sh",
+    "service:install": "scripts/service-install.sh",
+    "service:uninstall": "scripts/service-uninstall.sh",
+    "service:status": "scripts/service.sh status",
+    "service:pause": "scripts/service.sh pause",
+    "service:resume": "scripts/service.sh resume",
+    "service:restart": "scripts/service.sh restart",
+    "service:logs": "scripts/service.sh logs",
+    "dev:local": "./dev.sh"
   },
   "dependencies": {
     "dotenv": "^17.4.0",
