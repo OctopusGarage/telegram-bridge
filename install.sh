@@ -25,6 +25,7 @@ VERSION="${TGB_VERSION:-latest}"
 ORIGINAL_PATH="$PATH"
 NODE_BIN="${TGB_NODE_BIN:-${TGB_NODE:-$(command -v node || true)}}"
 ALLOW_MULTIPLE="${TGB_ALLOW_MULTIPLE_INSTALLS:-0}"
+SETUP_SERVICE="${TGB_SERVICE:-1}"
 ACTIVE_INSTALL_MARKER="${HOME}/.telegram-bridge-install-path"
 
 info() { printf '%s\n' ">= $*"; }
@@ -143,7 +144,7 @@ cat >"$BIN_DIR/telegram-bridge" <<EOF_RUNNER
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$INSTALL_DIR"
-exec "$NODE_BIN" "$INSTALL_DIR/dist/index.js" "$@"
+exec "$NODE_BIN" "$INSTALL_DIR/dist/index.js" "\$@"
 EOF_RUNNER
 chmod +x "$BIN_DIR/telegram-bridge"
 
@@ -156,8 +157,43 @@ info "Checking node runtime..."
 "$NODE_BIN" --version >/dev/null
 
 info "Done. Installed telegram-bridge $TAG at $INSTALL_DIR"
-info "Run: telegram-bridge"
+
+# Only auto-start the background service when the config is actually filled in.
+# An empty/placeholder BOT_TOKEN means the bot cannot connect, so starting a
+# KeepAlive service would just crash-loop with no hint — guide the user instead.
+CONFIG_READY=1
+TOKEN_VAL="$(grep -E '^BOT_TOKEN=' "$CONFIG_PATH" 2>/dev/null | head -n1 | sed 's/^BOT_TOKEN=//')"
+if [ -z "$TOKEN_VAL" ] || [ "$TOKEN_VAL" = "replace-me" ]; then
+  CONFIG_READY=0
+fi
+
+# Best-effort: a failure here (e.g. restricted/headless shell) must not fail the
+# install. Opt out of the service entirely with TGB_SERVICE=0.
+SERVICE_ACTIVE=0
+if [ "$SETUP_SERVICE" = "0" ]; then
+  info "Skipped background service setup (TGB_SERVICE=0)."
+elif [ "$CONFIG_READY" != "1" ]; then
+  info "Config at $CONFIG_PATH is not filled in yet (BOT_TOKEN is empty or 'replace-me')."
+  info "Edit it with your real bot token and settings, then start the service with:"
+  info "  cd $INSTALL_DIR && pnpm run service:install"
+  info "(Skipping auto-start until the config is ready.)"
+else
+  info "Setting up background service (auto-restart on crash, start at login)..."
+  if ( cd "$INSTALL_DIR" && bash scripts/service-install.sh ); then
+    SERVICE_ACTIVE=1
+    info "Service is up and will keep running in the background."
+  else
+    err "Could not set up the background service automatically."
+    err "This often happens in restricted/headless shells (CI, SSH without a login session)."
+    err "Set it up later from $INSTALL_DIR with:  pnpm run service:install"
+  fi
+fi
+
+if [ "$SERVICE_ACTIVE" != "1" ] && [ "$CONFIG_READY" = "1" ]; then
+  info "Run in the foreground with: telegram-bridge"
+fi
 info "Update later with: TGB_VERSION=<tag> TGB_REPO=<repo> bash install.sh"
+info "Disable auto-start service with: TGB_SERVICE=0 bash install.sh"
 if [ -n "$ORIGINAL_PATH" ] && [[ ":$ORIGINAL_PATH:" != *":$BIN_DIR:"* ]]; then
   info "Add $BIN_DIR to PATH to use the global command."
 fi

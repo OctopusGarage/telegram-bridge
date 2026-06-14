@@ -26,6 +26,11 @@ if launchctl print "$DOMAIN/$PLIST_NAME" >/dev/null 2>&1; then
   launchctl bootout "$DOMAIN/$PLIST_NAME" >/dev/null 2>&1 || launchctl unload "$TARGET" >/dev/null 2>&1 || true
 fi
 
+# A prior `launchctl bootout` (e.g. from uninstall) leaves the label DISABLED in
+# launchd's database, which makes the next `bootstrap` fail with "5: Input/output
+# error". Clear that state before loading.
+launchctl enable "$DOMAIN/$PLIST_NAME" >/dev/null 2>&1 || true
+
 loaded=0
 if launchctl bootstrap "$DOMAIN" "$TARGET" >/dev/null 2>&1; then
   loaded=1
