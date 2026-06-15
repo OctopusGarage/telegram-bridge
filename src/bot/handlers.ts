@@ -263,9 +263,7 @@ export const BOT_COMMANDS: BotCommand[] = [
   { command: "clear_recent_workdir", description: "Clear recent directory history" },
   { command: "list_recent_workdir", description: "List recent working directories" },
   { command: "queue_status", description: "Show queue status" },
-  { command: "attach", description: "Switch tmux session by number" },
-  { command: "remove", description: "Remove tmux session by number" },
-  { command: "sessions", description: "List tmux sessions" },
+  { command: "sessions", description: "List tmux sessions (with inline /attach_/remove_)" },
 ];
 
 // Per-user, per-session and global rate limiter with periodic cleanup.
