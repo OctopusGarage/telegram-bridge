@@ -1,7 +1,8 @@
 {
   "name": "telegram-bridge",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
@@ -9,6 +10,8 @@
     "start": "node dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
+    "lint": "biome check .",
+    "format": "biome check --write .",
     "lint:types": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.tests.json",
     "release": "scripts/release.sh",
     "release:package": "scripts/release-package.sh",
@@ -19,19 +22,31 @@
     "service:resume": "scripts/service.sh resume",
     "service:restart": "scripts/service.sh restart",
     "service:logs": "scripts/service.sh logs",
-    "dev:local": "./dev.sh"
+    "dev:local": "./dev.sh",
+    "prepare": "husky || true"
+  },
+  "lint-staged": {
+    "*.{ts,js,json}": "biome check --write --no-errors-on-unmatched"
   },
   "dependencies": {
-    "dotenv": "^17.4.0",
-    "grammy": "^1.42.0",
-    "undici": "^8.1.0",
-    "zod": "^4.3.6"
+    "dotenv": "^17.4.2",
+    "grammy": "^1.44.0",
+    "undici": "^8.4.1",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^25.5.2",
-    "tsx": "^4.21.0",
-    "typescript": "^6.0.2",
-    "vite": "8.0.5",
-    "vitest": "^4.1.2"
+    "@biomejs/biome": "2.4.16",
+    "@types/node": "^25.9.3",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.0.7",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "vite": "8.0.16",
+    "vitest": "^4.1.8"
+  },
+  "pnpm": {
+    "overrides": {
+      "postcss@<8.5.10": ">=8.5.10"
+    }
   }
 }

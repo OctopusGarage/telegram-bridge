@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs";
-import * as path from "node:path";
 import * as os from "node:os";
+import * as path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageQueue, type QueuedMessage } from "../../src/core/queue.js";
 
 const TEST_DIR = path.join(os.tmpdir(), "telegram-bridge-core-queue-tests");
@@ -143,7 +143,10 @@ describe("MessageQueue persistence", () => {
   });
 
   it("clearPersisted deletes legacy queue file too", () => {
-    const legacyDir = path.join(os.tmpdir(), `telegram-bridge-core-queue-legacy-clear-${Date.now()}`);
+    const legacyDir = path.join(
+      os.tmpdir(),
+      `telegram-bridge-core-queue-legacy-clear-${Date.now()}`,
+    );
     const legacyPath = path.join(legacyDir, ".queue", "pending.json");
 
     const originalCwd = process.cwd();
@@ -239,10 +242,16 @@ describe("MessageQueue backpressure and cancellation", () => {
       await blocker.promise;
     });
 
-    expect(queue.enqueue(makeMessage({ id: "first", text: "echo hi", reject: rejectA }))).toBe("queued");
-    expect(queue.enqueue(makeMessage({ id: "second", text: "echo hi", reject: rejectB }))).toBe("duplicate");
+    expect(queue.enqueue(makeMessage({ id: "first", text: "echo hi", reject: rejectA }))).toBe(
+      "queued",
+    );
+    expect(queue.enqueue(makeMessage({ id: "second", text: "echo hi", reject: rejectB }))).toBe(
+      "duplicate",
+    );
     expect(queue.enqueue(makeMessage({ id: "third", text: "echo bye" }))).toBe("queued");
-    expect(queue.enqueue(makeMessage({ id: "fourth", text: "echo hi", action: "raw-key" }))).toBe("queued");
+    expect(queue.enqueue(makeMessage({ id: "fourth", text: "echo hi", action: "raw-key" }))).toBe(
+      "queued",
+    );
 
     blocker.resolve();
   });

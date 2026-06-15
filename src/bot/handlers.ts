@@ -1,14 +1,15 @@
-import type { Bot, MiddlewareFn } from "grammy";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { TmuxBridge } from "../services/tmux.js";
-import { CurrentSessionManager } from "../services/currentSession.js";
+import type { Bot, MiddlewareFn } from "grammy";
 import { type MessageQueue, newMessageId, type QueuedMessage } from "../core/queue.js";
-import type { AppConfig, BotCommand } from "../types.js";
+import { appStateFile } from "../core/state-dir.js";
 import { validateCommand } from "../security.js";
+import type { CurrentSessionManager } from "../services/currentSession.js";
+import type { TmuxBridge } from "../services/tmux.js";
+import type { AppConfig, BotCommand } from "../types.js";
 import { sessionShortId } from "../utils/hash.js";
 import { expandTilde } from "../utils/path.js";
-import { appStateFile } from "../core/state-dir.js";
+import { shellQuote } from "../utils/shell.js";
 
 /** Resolve a session name from a short hash (6-char base62) */
 function resolveSessionByShortId(sessions: string[], shortId: string): string | null {
@@ -25,7 +26,10 @@ const MAX_ALLOWED_CWD_CHARS = 1024;
 
 function readLegacyRecentPaths(): string[] {
   try {
-    return fs.readFileSync(path.join(process.cwd(), "recent_workdir.txt"), "utf-8").split("\n").filter(Boolean);
+    return fs
+      .readFileSync(path.join(process.cwd(), "recent_workdir.txt"), "utf-8")
+      .split("\n")
+      .filter(Boolean);
   } catch {
     return [];
   }
@@ -64,7 +68,7 @@ function writeRecentWorkdirLines(lines: string[]): void {
     }
     return;
   }
-  fs.writeFileSync(recentWorkdirPath, lines.join("\n") + "\n", "utf-8");
+  fs.writeFileSync(recentWorkdirPath, `${lines.join("\n")}\n`, "utf-8");
 }
 
 function readRecentWorkdirLines(allowedCwdRoots: string[] = []): string[] {
@@ -72,13 +76,21 @@ function readRecentWorkdirLines(allowedCwdRoots: string[] = []): string[] {
   const fallbackLines = readLegacyRecentPaths();
   try {
     const rawLines = fs.readFileSync(recentWorkdirPath, "utf-8").split("\n");
-    let normalized = Array.from(new Set(rawLines
-      .map((line) => normalizeRecentWorkdirLine(line, allowedCwdRoots))
-      .filter((value): value is string => Boolean(value))));
+    let normalized = Array.from(
+      new Set(
+        rawLines
+          .map((line) => normalizeRecentWorkdirLine(line, allowedCwdRoots))
+          .filter((value): value is string => Boolean(value)),
+      ),
+    );
     if (normalized.length === 0 && fallbackLines.length > 0) {
-      normalized = Array.from(new Set(fallbackLines
-        .map((line) => normalizeRecentWorkdirLine(line, allowedCwdRoots))
-        .filter((value): value is string => Boolean(value))));
+      normalized = Array.from(
+        new Set(
+          fallbackLines
+            .map((line) => normalizeRecentWorkdirLine(line, allowedCwdRoots))
+            .filter((value): value is string => Boolean(value)),
+        ),
+      );
     }
     if (normalized.length !== rawLines.filter(Boolean).length) {
       writeRecentWorkdirLines(normalized);
@@ -129,7 +141,7 @@ async function appendRecentWorkdir(newPath: string): Promise<void> {
   }
   const recentWorkdirPath = getRecentWorkdirPath();
   fs.mkdirSync(path.dirname(recentWorkdirPath), { recursive: true });
-  fs.writeFileSync(recentWorkdirPath, filtered.join("\n") + "\n", "utf-8");
+  fs.writeFileSync(recentWorkdirPath, `${filtered.join("\n")}\n`, "utf-8");
 }
 
 async function switchToDir(ctx: any, idx: number, deps: HandlerDeps): Promise<void> {
@@ -159,8 +171,9 @@ async function switchToDir(ctx: any, idx: number, deps: HandlerDeps): Promise<vo
   }
 
   try {
-    await deps.bridge.ensurePaneExists();
-    await deps.bridge.sendCommand(`cd ${JSON.stringify(targetPath)} && pwd`);
+    const { session } = await resolveHandlerContext(null, deps);
+    await deps.bridge.ensurePaneExists(session);
+    await deps.bridge.sendCommand(`cd ${shellQuote(targetPath)} && pwd`, session);
     await appendRecentWorkdir(targetPath);
     await safeReply(ctx, `✅ cd to ${targetPath}`);
   } catch (err) {
@@ -168,7 +181,11 @@ async function switchToDir(ctx: any, idx: number, deps: HandlerDeps): Promise<vo
   }
 }
 
-export async function switchToSession(ctx: any, idOrIdx: string | number, deps: HandlerDeps): Promise<void> {
+export async function switchToSession(
+  ctx: any,
+  idOrIdx: string | number,
+  deps: HandlerDeps,
+): Promise<void> {
   try {
     const sessions = await deps.bridge.listSessionNames();
     let sessionName: string | null = null;
@@ -197,7 +214,11 @@ export async function switchToSession(ctx: any, idOrIdx: string | number, deps: 
   }
 }
 
-export async function removeSession(ctx: any, idOrIdx: string | number, deps: HandlerDeps): Promise<void> {
+export async function removeSession(
+  ctx: any,
+  idOrIdx: string | number,
+  deps: HandlerDeps,
+): Promise<void> {
   try {
     const sessions = await deps.bridge.listSessionNames();
     let sessionName: string | null = null;
@@ -228,8 +249,6 @@ export async function removeSession(ctx: any, idOrIdx: string | number, deps: Ha
 
 export const BOT_COMMANDS: BotCommand[] = [
   { command: "help", description: "Show all commands" },
-  { command: "startup", description: "Launch Claude" },
-  { command: "startup_continue", description: "Resume Claude with --continue" },
   { command: "peek", description: "Capture tmux pane" },
   { command: "esc", description: "Send Escape key" },
   { command: "enter", description: "Send Enter key" },
@@ -239,7 +258,7 @@ export const BOT_COMMANDS: BotCommand[] = [
   { command: "exit", description: "Send /exit to tmux" },
   { command: "clear", description: "Send /clear to tmux" },
   { command: "new", description: "Send /new to tmux" },
-  { command: "run", description: "Send claude-* command to tmux" },
+  { command: "run", description: "Send an allowed command to tmux" },
   { command: "cwd", description: "Change tmux working directory" },
   { command: "clear_recent_workdir", description: "Clear recent directory history" },
   { command: "list_recent_workdir", description: "List recent working directories" },
@@ -294,11 +313,11 @@ type HandlerDeps = {
 };
 
 const RAW_KEY_COMMANDS: Record<string, string[]> = {
-  "esc": ["Escape"],
-  "enter": ["Enter"],
-  "interrupt": ["C-c"],
-  "up": ["Up"],
-  "down": ["Down"],
+  esc: ["Escape"],
+  enter: ["Enter"],
+  interrupt: ["C-c"],
+  up: ["Up"],
+  down: ["Down"],
 };
 
 const TEXT_COMMANDS: { name: string; text: string }[] = [
@@ -311,9 +330,12 @@ const RUN_COMMAND_REGEX = /^\/run(?:@\w+)?\s+(\S+)\s+([\s\S]+)$/;
 
 // Parse: /run [session] <cmd...>
 // Session name is only recognized if it's a known tmux session (from config).
-// This avoids mis-parsing commands like: /run plugin:telegram@claude-plugins-official --continue
-// where "plugin:telegram" would otherwise be taken as the session name.
-export function parseRunCommand(text: string, knownSessions: string[]): { session: string | null; command: string } | null {
+// This avoids mis-parsing commands like: /run some-tool --flag=a:b
+// where "some-tool" would otherwise be taken as the session name.
+export function parseRunCommand(
+  text: string,
+  knownSessions: string[],
+): { session: string | null; command: string } | null {
   const match = RUN_COMMAND_REGEX.exec(text);
   if (match) {
     const candidate = match[1]!.trim();
@@ -326,7 +348,7 @@ export function parseRunCommand(text: string, knownSessions: string[]): { sessio
   return { session: null, command: noPrefix };
 }
 
-function getBridge(deps: HandlerDeps, session: string | null): TmuxBridge {
+function getBridge(deps: HandlerDeps, _session: string | null): TmuxBridge {
   return deps.bridge;
 }
 
@@ -338,33 +360,27 @@ export async function resolveHandlerContext(
 
   // Only read saved session from file when no explicit arg provided
   const savedSession = effectiveArg === null ? await deps.currentSessionManager.get() : null;
-  let session = effectiveArg ?? savedSession ?? deps.config.tmuxTarget.session;
+  const explicit = effectiveArg ?? savedSession;
 
+  // An explicitly-specified session (command arg or saved current session) is
+  // only honored if it actually exists — never fabricate an arbitrary name.
+  if (explicit && (await deps.bridge.sessionExists(explicit))) {
+    return { bridge: getBridge(deps, explicit), session: explicit };
+  }
+
+  // Otherwise fall back to the configured default session, creating that default
+  // on demand only when a command is received and it doesn't exist yet.
+  const session = deps.config.tmuxTarget.session;
   if (!session) {
     throw new Error("No session specified. Run /sessions to see available sessions.");
   }
-
-  // Auto-fallback: if saved session no longer exists, use default
   if (!(await deps.bridge.sessionExists(session))) {
-    const defaultSession = deps.config.tmuxTarget.session;
-    if (defaultSession && await deps.bridge.sessionExists(defaultSession)) {
-      console.warn(`[handlers] Saved session '${session}' not found, falling back to '${defaultSession}'`);
-      session = defaultSession;
-    } else {
-      throw new Error(`Session '${session}' does not exist`);
-    }
+    await deps.bridge.ensureSession(session);
   }
-
-  return {
-    bridge: getBridge(deps, effectiveArg ?? savedSession),
-    session,
-  };
+  return { bridge: getBridge(deps, session), session };
 }
 
-export async function executeQueuedCommand(
-  msg: QueuedMessage,
-  deps: HandlerDeps,
-): Promise<void> {
+export async function executeQueuedCommand(msg: QueuedMessage, deps: HandlerDeps): Promise<void> {
   const session = msg.sessionName;
   try {
     await deps.bridge.ensurePaneExists(session);
@@ -397,7 +413,10 @@ async function enqueueAction(
   const userSessionKey = `${chatId}:${session}`;
   const lastSession = sessionRateLimit.get(userSessionKey) ?? 0;
   if (now - lastSession < deps.config.sessionRateLimitMs) {
-    await safeReply(ctx, `Session is busy. Try again in ${Math.max(1, Math.ceil((deps.config.sessionRateLimitMs - (now - lastSession)) / 1000))}s.`);
+    await safeReply(
+      ctx,
+      `Session is busy. Try again in ${Math.max(1, Math.ceil((deps.config.sessionRateLimitMs - (now - lastSession)) / 1000))}s.`,
+    );
     return;
   }
   const lastGlobal = globalRateLimit.get(DEFAULT_GLOBAL_RATE_KEY) ?? 0;
@@ -434,12 +453,17 @@ async function enqueueAction(
   }
 }
 
-function enqueueTextCommand(ctx: any, session: string | null, command: string, deps: HandlerDeps): Promise<void> {
+function enqueueTextCommand(
+  ctx: any,
+  session: string | null,
+  command: string,
+  deps: HandlerDeps,
+): Promise<void> {
   const trimmed = command.trim();
   if (trimmed.length > deps.config.maxCommandLength) {
     return safeReply(ctx, `Command too long (max ${deps.config.maxCommandLength} chars).`);
   }
-  const security = validateCommand(trimmed);
+  const security = validateCommand(trimmed, deps.config.allowedRunPatterns);
   if (!security.ok) {
     return safeReply(ctx, `Rejected: ${security.reason}`);
   }
@@ -451,8 +475,11 @@ export function buildMiddleware(config: AppConfig): MiddlewareFn {
   return async (ctx, next) => {
     const userId = String(ctx.from?.id ?? "");
 
-    // User allowlist check
-    if (config.allowedUserIds.size > 0 && !config.allowedUserIds.has(userId)) {
+    // User allowlist check (fail closed): access requires either an explicit
+    // ALLOW_ALL_USERS opt-in or membership in the allowlist. An empty allowlist
+    // therefore denies everyone instead of allowing the world.
+    const userAllowed = config.allowAllUsers || config.allowedUserIds.has(userId);
+    if (!userAllowed) {
       await safeReply(ctx, "Access denied.");
       return;
     }
@@ -503,7 +530,9 @@ function shortenForStatus(text: string, maxLen = QUEUE_STATUS_MAX_PREVIEW): stri
 function formatQueueStatus(deps: HandlerDeps): string {
   const lines: string[] = [];
   const total = deps.queue.size();
-  lines.push(`📬 Queue status (max per session: ${deps.config.maxQueueSize}, concurrent sessions: ${deps.config.maxConcurrentSessions})`);
+  lines.push(
+    `📬 Queue status (max per session: ${deps.config.maxQueueSize}, concurrent sessions: ${deps.config.maxConcurrentSessions})`,
+  );
   lines.push(`Queued items: ${total}`);
 
   const sessions = deps.queue.getSessionNames().sort();
@@ -549,27 +578,28 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
   startRateLimitCleanup();
 
   bot.command("help", async (ctx) => {
-    await safeReply(ctx,
+    await safeReply(
+      ctx,
       "/peek [session] — capture tmux pane text\n" +
-      "/esc [session] — send Escape key\n" +
-      "/enter [session] — send Enter key\n" +
-      "/interrupt [session] — send Ctrl-C\n" +
-      "/up [session] — send Up arrow\n" +
-      "/down [session] — send Down arrow\n" +
-      "/exit [session] · /clear [session] · /new [session] — send command to tmux\n" +
-      `/startup [session] — ${deps.config.claudeStartupCommand}\n` +
-      `/startup_continue [session] — ${deps.config.claudeStartupCommand} --continue\n` +
-      "/run <cmd> — send claude-<name> command (no extra args)\n" +
-      "/cwd <path> — cd to path (allowed: " + deps.config.allowedCwdRoots.join(" · ") + ")\n" +
-      "/clear_recent_workdir — clear recent directory history\n" +
-      "/queue_status — show pending queue and current execution status\n" +
-      "/list_recent_workdir — show recent directories with /cwd_<n>\n" +
-      "/cwd_<n> — cd to recent directory by number\n" +
-      "/sessions — list tmux sessions\n" +
-      "/attach <hash> — attach to tmux session by short hash\n" +
-      "/remove <hash> — remove tmux session by short hash\n\n" +
-      "session is optional — defaults to saved session from .current_tmux_session\n" +
-      "run /sessions to see available hashes"
+        "/esc [session] — send Escape key\n" +
+        "/enter [session] — send Enter key\n" +
+        "/interrupt [session] — send Ctrl-C\n" +
+        "/up [session] — send Up arrow\n" +
+        "/down [session] — send Down arrow\n" +
+        "/exit [session] · /clear [session] · /new [session] — send command to tmux\n" +
+        "/run [session] <cmd> — send an allowed command (see ALLOWED_RUN_PATTERNS)\n" +
+        "/cwd <path> — cd to path (allowed: " +
+        deps.config.allowedCwdRoots.join(" · ") +
+        ")\n" +
+        "/clear_recent_workdir — clear recent directory history\n" +
+        "/queue_status — show pending queue and current execution status\n" +
+        "/list_recent_workdir — show recent directories with /cwd_<n>\n" +
+        "/cwd_<n> — cd to recent directory by number\n" +
+        "/sessions — list tmux sessions\n" +
+        "/attach <hash> — attach to tmux session by short hash\n" +
+        "/remove <hash> — remove tmux session by short hash\n\n" +
+        "session is optional — defaults to saved session from .current_tmux_session\n" +
+        "run /sessions to see available hashes",
     );
   });
 
@@ -578,15 +608,14 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
     const arg = raw === "" ? null : raw;
     const { bridge, session } = await resolveHandlerContext(arg, deps);
     try {
-      await bridge.ensurePaneExists();
-      const snapshot = await bridge.capturePane();
+      await bridge.ensurePaneExists(session);
+      const snapshot = await bridge.capturePane(session);
       const trimmed = snapshot.trim();
       const content = escapeHtml(trimmed.slice(-3500));
-      await safeReply(ctx,
-        trimmed
-          ? `📺 ${session}:\n<pre>${content}</pre>`
-          : `📺 ${session}: (empty pane)`,
-        { parse_mode: "HTML" }
+      await safeReply(
+        ctx,
+        trimmed ? `📺 ${session}:\n<pre>${content}</pre>` : `📺 ${session}: (empty pane)`,
+        { parse_mode: "HTML" },
       );
     } catch (err) {
       await safeReply(ctx, `Peek failed: ${errMessage(err)}`);
@@ -602,17 +631,6 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
   }
 
   for (const { name, text } of TEXT_COMMANDS) {
-    bot.command(name, async (ctx) => {
-      const raw = ctx.match?.trim() ?? "";
-      const arg = raw === "" ? null : raw;
-      await enqueueTextCommand(ctx, arg, text, deps);
-    });
-  }
-
-  for (const [name, text] of [
-    ["startup", deps.config.claudeStartupCommand],
-    ["startup_continue", `${deps.config.claudeStartupCommand} --continue`],
-  ] as const) {
     bot.command(name, async (ctx) => {
       const raw = ctx.match?.trim() ?? "";
       const arg = raw === "" ? null : raw;
@@ -639,7 +657,10 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
   bot.command("attach", async (ctx) => {
     const raw = (ctx.match as string)?.trim() ?? "";
     if (!raw) {
-      await safeReply(ctx, "Usage: /attach <hash>\ne.g. /attach abc123\n\nUse /sessions to see available hashes.");
+      await safeReply(
+        ctx,
+        "Usage: /attach <hash>\ne.g. /attach abc123\n\nUse /sessions to see available hashes.",
+      );
       return;
     }
     // Support both short hash (6-char base62) and legacy numeric index
@@ -657,7 +678,10 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
   bot.command("remove", async (ctx) => {
     const raw = (ctx.match as string)?.trim() ?? "";
     if (!raw) {
-      await safeReply(ctx, "Usage: /remove <hash>\ne.g. /remove abc123\n\nUse /sessions to see available hashes.");
+      await safeReply(
+        ctx,
+        "Usage: /remove <hash>\ne.g. /remove abc123\n\nUse /sessions to see available hashes.",
+      );
       return;
     }
     if (/^[a-zA-Z0-9]{6}$/.test(raw)) {
@@ -682,9 +706,7 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
       return;
     }
 
-    const msg = lines
-      .map((dir, i) => `${i + 1}. ${dir}\n/cwd_${i + 1}`)
-      .join("\n\n");
+    const msg = lines.map((dir, i) => `${i + 1}. ${dir}\n/cwd_${i + 1}`).join("\n\n");
 
     await safeReply(ctx, `📁 Recent directories:\n\n${msg}`);
   });
@@ -692,7 +714,10 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
   bot.command("cwd", async (ctx) => {
     const raw = (ctx.match as string)?.trim() ?? "";
     if (!raw) {
-      await safeReply(ctx, "Usage: /cwd <path>\nAllowed roots: " + deps.config.allowedCwdRoots.join(" · "));
+      await safeReply(
+        ctx,
+        `Usage: /cwd <path>\nAllowed roots: ${deps.config.allowedCwdRoots.join(" · ")}`,
+      );
       return;
     }
 
@@ -700,9 +725,9 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
     if (parts.length > 1) {
       await safeReply(ctx, "Usage: /cwd <path>\nOnly one path argument allowed.");
       return;
-  }
+    }
 
-  const targetPath = expandTilde(raw);
+    const targetPath = expandTilde(raw);
 
     let realPath: string;
     try {
@@ -713,12 +738,15 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
     }
 
     if (!isPathAllowed(realPath, deps.config.allowedCwdRoots)) {
-      await safeReply(ctx, `Path not allowed. Only within: ${deps.config.allowedCwdRoots.join(" · ")}`);
+      await safeReply(
+        ctx,
+        `Path not allowed. Only within: ${deps.config.allowedCwdRoots.join(" · ")}`,
+      );
       return;
     }
 
     await appendRecentWorkdir(realPath);
-    await enqueueAction(ctx, null, "command", `cd ${JSON.stringify(realPath)} && pwd`, deps);
+    await enqueueAction(ctx, null, "command", `cd ${shellQuote(realPath)} && pwd`, deps);
   });
 
   bot.command("run", async (ctx) => {

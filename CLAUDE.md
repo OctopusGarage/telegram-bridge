@@ -66,3 +66,32 @@ grep -rn "username\|/Users/[a-z]\+/\|/home/[a-z]\+/" \
 ```
 
 If any matches are found, refactor to use `process.env`, `os.homedir()`, or generic test data before committing.
+
+## Quality gates / tooling
+
+- **Biome** is the linter + formatter. `pnpm lint` (check) / `pnpm format` (write). Config in `biome.json`; `tests/**` disables `complexity/useArrowFunction` so `vi.fn(function(){})` constructor mocks aren't broken into arrows.
+- **tsc** does type checking only: `pnpm run lint:types` (covers app + tests). Biome ≠ tsc — keep both.
+- **Git hooks (husky)**: `pre-commit` runs lint-staged (Biome on staged) + `lint:types`; `pre-push` runs `pnpm test`. Installed via the `prepare` script on `pnpm install`.
+- CI (`.github/workflows/ci.yml`) runs Biome + build + test + type check on ubuntu & macOS; these are required status checks on `main`.
+
+## Releasing
+
+Cut a release from a clean `main`:
+
+```bash
+pnpm run release -- patch      # or minor | major | X.Y.Z
+# equivalently: bash scripts/release.sh patch
+```
+
+`scripts/release.sh` bumps `package.json`, commits `release: vX.Y.Z`, creates an annotated tag, and pushes with `--follow-tags`. The pushed `v*` tag triggers `.github/workflows/release.yml`, which builds/tests and publishes the GitHub release with tar.gz/zip + sha256sum assets.
+
+**Gotcha (already fixed — do not reintroduce):** the version-bump uses `node - "${BUMP}" <<'NODE' … NODE`. The `"${BUMP}"` argument MUST stay on the `node -` invocation line. If it is moved after the closing `NODE` heredoc delimiter it becomes a separate shell command, `process.argv[2]` is undefined, and the script fails with `missing bump`.
+
+Release-packaged files (anything under `scripts/`, `src/`, `.env.example`, etc.) only reach `curl | bash` users in a new release; `install.sh` itself is fetched from `main` so its changes take effect immediately.
+
+## install.sh
+
+- Installs to `~/.telegram-bridge` and a launcher at `~/.local/bin/telegram-bridge`; preserves an existing `.env` across re-installs.
+- Sets up the background service by default; skips auto-start (and prints guidance) when `BOT_TOKEN` is empty/placeholder. Opt out with `TGB_SERVICE=0`.
+
+**Gotcha (already fixed — do not reintroduce):** the release-asset name is hardcoded `telegram-bridge-*`, so the installer only makes sense for a telegram-bridge repo. The cwd git-remote auto-detection MUST only adopt a `*/telegram-bridge` remote — otherwise running the canonical `curl .../telegram-bridge/main/install.sh | bash` from inside an unrelated project (e.g. `tmux-claude-bot`) makes it resolve that repo, 404 on the hardcoded asset name, fall back to the wrong source archive, and fail `pnpm install` with a lockfile/overrides mismatch. Any other repo falls back to canonical `OctopusGarage/telegram-bridge`; `TGB_REPO=` still overrides explicitly.

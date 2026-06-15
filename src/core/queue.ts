@@ -39,7 +39,11 @@ export class MessageQueue {
   private readonly legacyPersistPath: string;
   private persistScheduled = false;
 
-  constructor(maxSize = 30, persistPath = appStateFile(".queue/pending.json"), maxConcurrentSessions = Infinity) {
+  constructor(
+    maxSize = 30,
+    persistPath = appStateFile(".queue/pending.json"),
+    maxConcurrentSessions = Infinity,
+  ) {
     this.maxSize = maxSize;
     this.maxConcurrentSessions = maxConcurrentSessions;
     this.persistPath = persistPath;

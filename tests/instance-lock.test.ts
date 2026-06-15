@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const TEST_DIR = path.join(os.tmpdir(), `telegram-bridge-instance-lock-${Date.now()}`);
 
@@ -34,7 +34,9 @@ describe("instance-lock", () => {
     vi.doMock("node:child_process", () => ({
       execFileSync: vi.fn(),
     }));
-    const { acquireInstanceLock, releaseInstanceLock } = await import("../src/core/instance-lock.js");
+    const { acquireInstanceLock, releaseInstanceLock } = await import(
+      "../src/core/instance-lock.js"
+    );
 
     acquireInstanceLock();
     const raw = fs.readFileSync(lockPath(), "utf-8");
@@ -49,7 +51,9 @@ describe("instance-lock", () => {
     vi.doMock("node:child_process", () => ({
       execFileSync: vi.fn(),
     }));
-    const { acquireInstanceLock, releaseInstanceLock } = await import("../src/core/instance-lock.js");
+    const { acquireInstanceLock, releaseInstanceLock } = await import(
+      "../src/core/instance-lock.js"
+    );
 
     const holder = { pid: 999999, startedAt: new Date().toISOString() };
     fs.writeFileSync(lockPath(), JSON.stringify(holder), "utf-8");
@@ -76,7 +80,9 @@ describe("instance-lock", () => {
     vi.doMock("node:child_process", () => ({
       execFileSync: vi.fn().mockReturnValue("telegram-bridge\n"),
     }));
-    const { acquireInstanceLock, InstanceLockHeldError } = await import("../src/core/instance-lock.js");
+    const { acquireInstanceLock, InstanceLockHeldError } = await import(
+      "../src/core/instance-lock.js"
+    );
 
     const holder = { pid: 999999, startedAt: new Date().toISOString() };
     fs.writeFileSync(lockPath(), JSON.stringify(holder), "utf-8");

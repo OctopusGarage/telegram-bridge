@@ -24,7 +24,21 @@ echo_info "Installed to $TARGET"
 if launchctl print "$DOMAIN/$PLIST_NAME" >/dev/null 2>&1; then
   echo_info "Unloading existing launchd service..."
   launchctl bootout "$DOMAIN/$PLIST_NAME" >/dev/null 2>&1 || launchctl unload "$TARGET" >/dev/null 2>&1 || true
+
+  # Wait for the old instance to fully exit before bootstrapping a new one.
+  # bootout signals SIGTERM but shutdown is async; if the old and new processes
+  # overlap they fight over the single-instance lock / Telegram long-poll (409),
+  # leaving the service flapping. Poll up to ~10s, then proceed best-effort.
+  for _ in $(seq 1 20); do
+    pgrep -f "$PROJECT_DIR/dist/index.js" >/dev/null 2>&1 || break
+    sleep 0.5
+  done
 fi
+
+# A prior `launchctl bootout` (e.g. from uninstall) leaves the label DISABLED in
+# launchd's database, which makes the next `bootstrap` fail with "5: Input/output
+# error". Clear that state before loading.
+launchctl enable "$DOMAIN/$PLIST_NAME" >/dev/null 2>&1 || true
 
 loaded=0
 if launchctl bootstrap "$DOMAIN" "$TARGET" >/dev/null 2>&1; then

@@ -12,13 +12,14 @@ function makeConfig(overrides: Partial<Record<string, any>> = {}) {
     maxPollTicks: 20,
     proxyUrl: undefined,
     allowedUserIds: new Set<string>(),
+    allowAllUsers: false,
     maxCommandLength: 5000,
     rateLimitMs: 2000,
     sessionRateLimitMs: 1000,
     globalRateLimitMs: 500,
     maxConcurrentSessions: 3,
     maxQueueSize: 10,
-    claudeStartupCommand: "/startup",
+    allowedRunPatterns: ["claude(-[a-z]+)?"],
     allowedCwdRoots: [],
     ...overrides,
   };
@@ -77,7 +78,7 @@ describe("handlers rate limiting", () => {
     const runHandler = handlers.run;
     expect(runHandler).toBeDefined();
 
-  const now = vi.spyOn(Date, "now");
+    const now = vi.spyOn(Date, "now");
     let nowSeed = 1_000;
     now.mockImplementation(() => {
       const value = nowSeed;
@@ -161,7 +162,10 @@ describe("handlers rate limiting", () => {
     } as any);
 
     expect(queue.enqueue).toHaveBeenCalledTimes(1);
-    expect(reply2).toHaveBeenCalledWith("Queue is temporarily throttled. Please wait a moment.", undefined);
+    expect(reply2).toHaveBeenCalledWith(
+      "Queue is temporarily throttled. Please wait a moment.",
+      undefined,
+    );
     now.mockRestore();
   });
 
@@ -172,10 +176,14 @@ describe("handlers rate limiting", () => {
     const queue = {
       size: vi.fn().mockReturnValue(3),
       getSessionNames: vi.fn().mockReturnValue(["default"]),
-      getSessionQueue: vi.fn().mockReturnValue([
-        makeQueuedMessage({ id: "q1", text: "second in line" }),
-      ]),
-      getCurrentMessage: vi.fn().mockReturnValue(makeQueuedMessage({ id: "running", text: "first in line", action: "command" })),
+      getSessionQueue: vi
+        .fn()
+        .mockReturnValue([makeQueuedMessage({ id: "q1", text: "second in line" })]),
+      getCurrentMessage: vi
+        .fn()
+        .mockReturnValue(
+          makeQueuedMessage({ id: "running", text: "first in line", action: "command" }),
+        ),
       isSessionProcessing: vi.fn().mockReturnValue(true),
     };
 

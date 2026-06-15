@@ -6,7 +6,7 @@ describe("TmuxBridge", () => {
     const execFile = vi.fn().mockResolvedValue({ stdout: "", stderr: "" });
     const bridge = new TmuxBridge({
       execFile,
-      target: { session: "session", window: 1, pane: 2 }
+      target: { session: "session", window: 1, pane: 2 },
     });
 
     await bridge.sendCommand("pwd");
@@ -42,6 +42,30 @@ describe("TmuxBridge", () => {
 
     expect(await bridge.sessionExists("dev")).toBe(true);
     expect(await bridge.sessionExists("missing")).toBe(false);
+  });
+
+  it("ensureSession creates a detached session when missing", async () => {
+    const execFile = vi.fn().mockResolvedValue({ stdout: "work: 1 windows\n", stderr: "" });
+    const bridge = new TmuxBridge({
+      execFile,
+      target: { session: "session", window: 0, pane: 0 },
+    });
+
+    await bridge.ensureSession("newone");
+    expect(execFile).toHaveBeenCalledWith("tmux", ["new-session", "-d", "-s", "newone"]);
+  });
+
+  it("ensureSession is a no-op when the session already exists", async () => {
+    const execFile = vi
+      .fn()
+      .mockResolvedValue({ stdout: "work: 1 windows\ndev: 2 windows\n", stderr: "" });
+    const bridge = new TmuxBridge({
+      execFile,
+      target: { session: "session", window: 0, pane: 0 },
+    });
+
+    await bridge.ensureSession("dev");
+    expect(execFile).not.toHaveBeenCalledWith("tmux", ["new-session", "-d", "-s", "dev"]);
   });
 
   it("kills tmux session", async () => {

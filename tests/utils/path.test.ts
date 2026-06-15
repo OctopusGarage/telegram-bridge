@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
-import * as path from "node:path";
 import { homedir } from "node:os";
+import * as path from "node:path";
+import { describe, expect, it } from "vitest";
 import { expandTilde } from "../../src/utils/path.js";
 
 describe("expandTilde", () => {
@@ -20,4 +20,3 @@ describe("expandTilde", () => {
     expect(expandTilde("~alice/repo")).toBe("~alice/repo");
   });
 });
-

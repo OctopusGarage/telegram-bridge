@@ -2,12 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 type EventCallback = (...value: unknown[]) => void | Promise<void>;
 
-function createEnv(overrides: {
-  restoredMessages?: any[];
-  uncleanRestart?: boolean;
-  getMe?: () => Promise<{ id: number; username: string }>;
-  acquireInstanceLock?: () => void;
-} = {}) {
+function createEnv(
+  overrides: {
+    restoredMessages?: any[];
+    uncleanRestart?: boolean;
+    getMe?: () => Promise<{ id: number; username: string }>;
+    acquireInstanceLock?: () => void;
+  } = {},
+) {
   let processExitCode = 0;
   const restoredMessages = overrides.restoredMessages ?? [];
   const BOT_COMMANDS = [{ command: "help", description: "Show all commands" }];
@@ -51,6 +53,7 @@ function createEnv(overrides: {
     start: vi.fn().mockResolvedValue(undefined),
     command: vi.fn(),
     on: vi.fn(),
+    catch: vi.fn(),
   };
 
   vi.resetModules();
@@ -75,13 +78,13 @@ function createEnv(overrides: {
       globalRateLimitMs: 500,
       maxConcurrentSessions: 3,
       maxQueueSize: 30,
-      claudeStartupCommand: "/startup",
+      allowedRunPatterns: [],
       allowedCwdRoots: [],
     })),
   }));
   vi.doMock("../src/bot/handlers.js", () => ({
     BOT_COMMANDS,
-    buildMiddleware: vi.fn(() => (ctx: unknown, next: () => Promise<void>) => next()),
+    buildMiddleware: vi.fn(() => (_ctx: unknown, next: () => Promise<void>) => next()),
     registerHandlers,
     executeQueuedCommand: vi.fn(),
     stopRateLimitCleanup,
@@ -112,10 +115,12 @@ function createEnv(overrides: {
     }),
   }));
 
-  const processExit = vi.spyOn(process, "exit").mockImplementation((code?: number | string | null) => {
-    processExitCode = code === undefined ? 0 : Number(code);
-    return undefined as never;
-  });
+  const processExit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((code?: number | string | null) => {
+      processExitCode = code === undefined ? 0 : Number(code);
+      return undefined as never;
+    });
 
   vi.spyOn(process, "once").mockImplementation((event, listener) => {
     onceCallbacks[event as string] = listener as EventCallback;
@@ -149,7 +154,9 @@ describe("index bootstrap and shutdown", () => {
   });
 
   it("restores persisted queued messages during startup", async () => {
-    const restored = [{ id: "old-1", text: "ls", chatId: 1, sessionName: "default", action: "command" }];
+    const restored = [
+      { id: "old-1", text: "ls", chatId: 1, sessionName: "default", action: "command" },
+    ];
     const env = createEnv({ restoredMessages: restored });
 
     await import("../src/index.js");
@@ -165,10 +172,9 @@ describe("index bootstrap and shutdown", () => {
         action: "command",
       }),
     );
-    expect(env.bot.api.setMyCommands).toHaveBeenCalledWith(
-      env.BOT_COMMANDS,
-      { scope: { type: "all_private_chats" } },
-    );
+    expect(env.bot.api.setMyCommands).toHaveBeenCalledWith(env.BOT_COMMANDS, {
+      scope: { type: "all_private_chats" },
+    });
   });
 
   it("SIGTERM clears in-memory queue and marks clean shutdown", async () => {
@@ -211,10 +217,9 @@ describe("index bootstrap and shutdown", () => {
     await importPromise;
 
     expect(getMe).toHaveBeenCalledTimes(2);
-    expect(env.bot.api.setMyCommands).toHaveBeenCalledWith(
-      env.BOT_COMMANDS,
-      { scope: { type: "all_private_chats" } },
-    );
+    expect(env.bot.api.setMyCommands).toHaveBeenCalledWith(env.BOT_COMMANDS, {
+      scope: { type: "all_private_chats" },
+    });
     expect(env.getExitCode()).toBe(0);
   });
 
@@ -232,7 +237,11 @@ describe("index bootstrap and shutdown", () => {
 
   it("propagates unexpected instance lock error", async () => {
     const lockError = new Error("lock failure");
-    const env = createEnv({ acquireInstanceLock: () => { throw lockError; } });
+    const env = createEnv({
+      acquireInstanceLock: () => {
+        throw lockError;
+      },
+    });
 
     await expect(import("../src/index.js")).rejects.toThrow("lock failure");
     expect(env.getExitCode()).toBe(0);

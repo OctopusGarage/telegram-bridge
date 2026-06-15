@@ -12,14 +12,15 @@ export type AppConfig = {
   idlePollTicks: number;
   maxPollTicks: number;
   proxyUrl?: string;
-  allowedUserIds: Set<string>;  // Telegram user IDs with access
+  allowedUserIds: Set<string>; // Telegram user IDs with access
+  allowAllUsers: boolean; // when true, disables the allowlist (explicit opt-in)
   maxCommandLength: number;
   rateLimitMs: number;
   sessionRateLimitMs: number;
   globalRateLimitMs: number;
   maxConcurrentSessions: number;
-  claudeStartupCommand: string;
-  allowedCwdRoots: string[];  // Allowed directories for /cwd command (e.g. ["~/programming"])
+  allowedRunPatterns: string[]; // Regex patterns a /run command must fully match (fail closed if empty)
+  allowedCwdRoots: string[]; // Allowed directories for /cwd command (e.g. ["~/programming"])
   maxQueueSize: number;
 };
 

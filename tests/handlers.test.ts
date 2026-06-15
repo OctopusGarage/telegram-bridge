@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildMiddleware, parseRunCommand, resolveHandlerContext, formatSessionsList, switchToSession } from "../src/bot/handlers.js";
+import {
+  buildMiddleware,
+  formatSessionsList,
+  parseRunCommand,
+  resolveHandlerContext,
+  switchToSession,
+} from "../src/bot/handlers.js";
 import type { AppConfig } from "../src/types.js";
 
 describe("resolveHandlerContext", () => {
@@ -8,7 +14,10 @@ describe("resolveHandlerContext", () => {
       sessionExists: vi.fn().mockResolvedValue(true),
     } as any;
     const mockConfig = { tmuxTarget: { session: "config_default", window: 0, pane: 0 } } as any;
-    const mockCurrentSession = { get: vi.fn().mockResolvedValue("saved_session"), exists: vi.fn().mockResolvedValue(true) } as any;
+    const mockCurrentSession = {
+      get: vi.fn().mockResolvedValue("saved_session"),
+      exists: vi.fn().mockResolvedValue(true),
+    } as any;
 
     const deps: any = {
       bridge: mockBridge,
@@ -26,7 +35,10 @@ describe("resolveHandlerContext", () => {
       sessionExists: vi.fn().mockResolvedValue(true),
     } as any;
     const mockConfig = { tmuxTarget: { session: "config_default", window: 0, pane: 0 } } as any;
-    const mockCurrentSession = { get: vi.fn().mockResolvedValue("saved_session"), exists: vi.fn().mockResolvedValue(true) } as any;
+    const mockCurrentSession = {
+      get: vi.fn().mockResolvedValue("saved_session"),
+      exists: vi.fn().mockResolvedValue(true),
+    } as any;
 
     const deps: any = {
       bridge: mockBridge,
@@ -38,6 +50,49 @@ describe("resolveHandlerContext", () => {
 
     expect(result.session).toBe("other_session");
   });
+
+  it("auto-creates the target session when it does not exist", async () => {
+    const ensureSession = vi.fn().mockResolvedValue(undefined);
+    const mockBridge = {
+      sessionExists: vi.fn().mockResolvedValue(false),
+      ensureSession,
+    } as any;
+    const mockConfig = { tmuxTarget: { session: "config_default", window: 0, pane: 0 } } as any;
+    const mockCurrentSession = { get: vi.fn().mockResolvedValue(null) } as any;
+
+    const deps: any = {
+      bridge: mockBridge,
+      config: mockConfig,
+      currentSessionManager: mockCurrentSession,
+      queue: {},
+    };
+    const result = await resolveHandlerContext(null, deps);
+
+    expect(result.session).toBe("config_default");
+    expect(ensureSession).toHaveBeenCalledWith("config_default");
+  });
+
+  it("does not create an explicitly-specified session; falls back to the default", async () => {
+    const ensureSession = vi.fn().mockResolvedValue(undefined);
+    const mockBridge = {
+      sessionExists: vi.fn().mockResolvedValue(false),
+      ensureSession,
+    } as any;
+    const mockConfig = { tmuxTarget: { session: "config_default", window: 0, pane: 0 } } as any;
+    const mockCurrentSession = { get: vi.fn().mockResolvedValue(null) } as any;
+
+    const deps: any = {
+      bridge: mockBridge,
+      config: mockConfig,
+      currentSessionManager: mockCurrentSession,
+      queue: {},
+    };
+    const result = await resolveHandlerContext("typo_session", deps);
+
+    expect(result.session).toBe("config_default");
+    expect(ensureSession).toHaveBeenCalledWith("config_default");
+    expect(ensureSession).not.toHaveBeenCalledWith("typo_session");
+  });
 });
 
 describe("parseRunCommand", () => {
@@ -46,7 +101,10 @@ describe("parseRunCommand", () => {
   });
 
   it("supports bot-qualified commands", () => {
-    expect(parseRunCommand("/run@bridge_bot echo hi", [])).toEqual({ session: null, command: "echo hi" });
+    expect(parseRunCommand("/run@bridge_bot echo hi", [])).toEqual({
+      session: null,
+      command: "echo hi",
+    });
   });
 
   it("returns null when the command is missing", () => {
@@ -54,7 +112,10 @@ describe("parseRunCommand", () => {
   });
 
   it("supports explicit session when it matches known sessions", () => {
-    expect(parseRunCommand("/run default ls", ["default"])).toEqual({ session: "default", command: "ls" });
+    expect(parseRunCommand("/run default ls", ["default"])).toEqual({
+      session: "default",
+      command: "ls",
+    });
   });
 });
 
@@ -98,7 +159,10 @@ describe("switchToSession", () => {
     const sessions = ["work", "dev", "my_session", "staging"];
     const mockBridge = { listSessionNames: vi.fn().mockResolvedValue(sessions) } as any;
     const mockConfig = { tmuxTarget: { session: "config_default", window: 0, pane: 0 } } as any;
-    const mockCurrentSession = { get: vi.fn().mockResolvedValue("my_session"), set: vi.fn() } as any;
+    const mockCurrentSession = {
+      get: vi.fn().mockResolvedValue("my_session"),
+      set: vi.fn(),
+    } as any;
     const mockCtx = { reply: vi.fn() } as any;
 
     const deps: any = {
@@ -135,16 +199,33 @@ describe("switchToSession", () => {
 });
 
 describe("buildMiddleware", () => {
-  const baseConfig = (allowedUserIds: string[]) =>
+  const baseConfig = (allowedUserIds: string[], allowAllUsers = false) =>
     ({
       allowedUserIds: new Set(allowedUserIds),
+      allowAllUsers,
       rateLimitMs: 2000,
-    } as unknown as AppConfig);
+    }) as unknown as AppConfig;
 
-  it("allows all users when allowlist is empty", async () => {
-    const allowed = buildMiddleware(baseConfig([]));
+  it("denies all users when allowlist is empty and ALLOW_ALL_USERS is not set (fail closed)", async () => {
+    const mw = buildMiddleware(baseConfig([]));
+    const reply = vi.fn();
     const next = vi.fn();
-    await allowed({ from: { id: 1 }, reply: vi.fn() } as any, next);
+    await mw({ from: { id: 1 }, reply } as any, next);
+    expect(reply).toHaveBeenCalledWith("Access denied.", undefined);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("allows any user when allowAllUsers is true", async () => {
+    const mw = buildMiddleware(baseConfig([], true));
+    const next = vi.fn();
+    await mw({ from: { id: 1 }, reply: vi.fn() } as any, next);
+    expect(next).toHaveBeenCalled();
+  });
+
+  it("allows a user present in the allowlist", async () => {
+    const mw = buildMiddleware(baseConfig(["7"]));
+    const next = vi.fn();
+    await mw({ from: { id: 7 }, reply: vi.fn() } as any, next);
     expect(next).toHaveBeenCalled();
   });
 

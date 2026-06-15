@@ -8,7 +8,7 @@ loadEnv(envPath ? { path: envPath } : {});
 
 const envSchema = z.object({
   BOT_TOKEN: z.string().min(1),
-  TMUX_SESSION: z.string().min(1),
+  TMUX_SESSION: z.string().min(1).default("telegram_tmux_session"),
   TMUX_WINDOW: z.string().optional().default(""),
   TMUX_PANE: z.string().optional().default(""),
   POLL_INTERVAL_MS: z.coerce.number().int().positive().default(1200),
@@ -20,11 +20,12 @@ const envSchema = z.object({
   MAX_QUEUE_SIZE: z.coerce.number().int().positive().default(30),
   MAX_CONCURRENT_SESSIONS: z.coerce.number().int().positive().default(3),
   ALLOWED_USER_IDS: z.string().default(""),
+  ALLOW_ALL_USERS: z.string().optional().default(""),
   MAX_COMMAND_LENGTH: z.coerce.number().int().positive().default(5000),
   RATE_LIMIT_MS: z.coerce.number().int().positive().default(2000),
   SESSION_RATE_LIMIT_MS: z.coerce.number().int().positive().default(1200),
   GLOBAL_RATE_LIMIT_MS: z.coerce.number().int().positive().default(500),
-  CLAUDE_STARTUP_COMMAND: z.string().min(1),
+  ALLOWED_RUN_PATTERNS: z.string().default(""),
   ALLOWED_CWD_ROOTS: z.string().default(""),
 });
 
@@ -49,20 +50,21 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     maxPollTicks: parsed.MAX_POLL_TICKS,
     proxyUrl: parsed.HTTPS_PROXY ?? parsed.HTTP_PROXY,
     allowedUserIds: new Set(
-      parsed.ALLOWED_USER_IDS
-        .split(",")
+      parsed.ALLOWED_USER_IDS.split(",")
         .map((s) => s.trim())
-        .filter(Boolean)
+        .filter(Boolean),
     ),
+    allowAllUsers: /^(1|true|yes)$/i.test(parsed.ALLOW_ALL_USERS.trim()),
     maxCommandLength: parsed.MAX_COMMAND_LENGTH,
     rateLimitMs: parsed.RATE_LIMIT_MS,
     sessionRateLimitMs: parsed.SESSION_RATE_LIMIT_MS,
     globalRateLimitMs: parsed.GLOBAL_RATE_LIMIT_MS,
     maxConcurrentSessions: parsed.MAX_CONCURRENT_SESSIONS,
     maxQueueSize: parsed.MAX_QUEUE_SIZE,
-    claudeStartupCommand: parsed.CLAUDE_STARTUP_COMMAND,
-    allowedCwdRoots: parsed.ALLOWED_CWD_ROOTS
-      .split(",")
+    allowedRunPatterns: parsed.ALLOWED_RUN_PATTERNS.split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+    allowedCwdRoots: parsed.ALLOWED_CWD_ROOTS.split(",")
       .map((s) => s.trim())
       .map(expandTilde)
       .filter(Boolean)

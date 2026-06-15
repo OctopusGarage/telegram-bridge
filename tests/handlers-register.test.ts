@@ -1,9 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { sessionShortId } from "../src/utils/hash.js";
+import { describe, expect, it, vi } from "vitest";
 import { appStateFile } from "../src/core/state-dir.js";
+import { sessionShortId } from "../src/utils/hash.js";
+import { shellQuote } from "../src/utils/shell.js";
 
 type CommandHandler = (ctx: any) => Promise<void> | void;
 
@@ -17,20 +18,24 @@ function makeConfig(overrides: Partial<Record<string, any>> = {}) {
     maxPollTicks: 20,
     proxyUrl: undefined,
     allowedUserIds: new Set<string>(),
+    allowAllUsers: true,
     maxCommandLength: 5000,
     rateLimitMs: 2000,
     sessionRateLimitMs: 1000,
     globalRateLimitMs: 500,
     maxConcurrentSessions: 3,
     maxQueueSize: 10,
-    claudeStartupCommand: "/startup",
+    allowedRunPatterns: ["claude(-[a-z]+)?"],
     allowedCwdRoots: [],
     ...overrides,
   };
 }
 
 function makeTempDir(prefix: string): string {
-  const candidate = path.join(os.tmpdir(), `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const candidate = path.join(
+    os.tmpdir(),
+    `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
   fs.mkdirSync(candidate, { recursive: true });
   return candidate;
 }
@@ -195,7 +200,10 @@ describe("registerHandlers", () => {
       from: { id: 1 },
     } as any);
 
-    expect(reply).toHaveBeenCalledWith("Invalid session id. Use /sessions to see available hashes.", undefined);
+    expect(reply).toHaveBeenCalledWith(
+      "Invalid session id. Use /sessions to see available hashes.",
+      undefined,
+    );
   });
 
   it("/attach legacy numeric index honors current session ordering", async () => {
@@ -308,7 +316,7 @@ describe("registerHandlers", () => {
       },
     } as any;
 
-    const { bot, commands, messageHandlers } = buildBot();
+    const { bot, messageHandlers } = buildBot();
     registerHandlers(bot as any, deps);
 
     const textReply = vi.fn();
@@ -575,6 +583,7 @@ describe("registerHandlers", () => {
       bridge: {
         ensurePaneExists: vi.fn().mockResolvedValue(undefined),
         sendCommand: vi.fn().mockResolvedValue(undefined),
+        sessionExists: vi.fn().mockResolvedValue(true),
       },
       config: makeConfig({ allowedCwdRoots: [fixtureRoot] }),
       currentSessionManager: { get: vi.fn().mockResolvedValue("default"), set: vi.fn() },
@@ -601,7 +610,10 @@ describe("registerHandlers", () => {
         chat: { id: 1 },
         from: { id: 1 },
       } as any);
-      expect(deps.bridge.sendCommand).toHaveBeenCalledWith(`cd ${JSON.stringify(dirB)} && pwd`);
+      expect(deps.bridge.sendCommand).toHaveBeenCalledWith(
+        `cd ${shellQuote(dirB)} && pwd`,
+        "default",
+      );
       expect(textReply).toHaveBeenCalledWith(`✅ cd to ${dirB}`, undefined);
 
       await messageHandlers["message:text"]({
@@ -639,7 +651,14 @@ describe("registerHandlers", () => {
       },
       config: makeConfig(),
       currentSessionManager: { get: vi.fn().mockResolvedValue("default") },
-      queue: { size: vi.fn(), enqueue: vi.fn(), getSessionNames: vi.fn(), getSessionQueue: vi.fn(), getCurrentMessage: vi.fn(), isSessionProcessing: vi.fn() },
+      queue: {
+        size: vi.fn(),
+        enqueue: vi.fn(),
+        getSessionNames: vi.fn(),
+        getSessionQueue: vi.fn(),
+        getCurrentMessage: vi.fn(),
+        isSessionProcessing: vi.fn(),
+      },
     } as any;
 
     const { bot, commands } = buildBot();
@@ -653,9 +672,11 @@ describe("registerHandlers", () => {
       from: { id: 3 },
     } as any);
 
-    expect(deps.bridge.ensurePaneExists).toHaveBeenCalledWith();
-    expect(deps.bridge.capturePane).toHaveBeenCalledWith();
-    expect(reply).toHaveBeenCalledWith("📺 default:\n<pre>pane content</pre>", { parse_mode: "HTML" });
+    expect(deps.bridge.ensurePaneExists).toHaveBeenCalledWith("default");
+    expect(deps.bridge.capturePane).toHaveBeenCalledWith("default");
+    expect(reply).toHaveBeenCalledWith("📺 default:\n<pre>pane content</pre>", {
+      parse_mode: "HTML",
+    });
   });
 
   it("/peek surfaces error message when bridge fails", async () => {
@@ -670,7 +691,14 @@ describe("registerHandlers", () => {
       },
       config: makeConfig(),
       currentSessionManager: { get: vi.fn().mockResolvedValue("default") },
-      queue: { size: vi.fn(), enqueue: vi.fn(), getSessionNames: vi.fn(), getSessionQueue: vi.fn(), getCurrentMessage: vi.fn(), isSessionProcessing: vi.fn() },
+      queue: {
+        size: vi.fn(),
+        enqueue: vi.fn(),
+        getSessionNames: vi.fn(),
+        getSessionQueue: vi.fn(),
+        getCurrentMessage: vi.fn(),
+        isSessionProcessing: vi.fn(),
+      },
     } as any;
 
     const { bot, commands } = buildBot();
@@ -756,11 +784,13 @@ describe("registerHandlers", () => {
       from: { id: 1 },
     } as any);
 
-    expect(queue.enqueue).toHaveBeenCalledWith(expect.objectContaining({
-      action: "command",
-      text: expect.stringContaining(`cd ${JSON.stringify(tmpDir)} && pwd`),
-      sessionName: "default",
-    }));
+    expect(queue.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "command",
+        text: expect.stringContaining(`cd ${shellQuote(tmpDir)} && pwd`),
+        sessionName: "default",
+      }),
+    );
     expect(reply).toHaveBeenCalledWith(expect.stringContaining("✅ Sent to default"), undefined);
   });
 
@@ -799,11 +829,13 @@ describe("registerHandlers", () => {
       from: { id: 1 },
     } as any);
 
-    expect(queue.enqueue).toHaveBeenCalledWith(expect.objectContaining({
-      action: "command",
-      text: expect.stringContaining(`cd ${JSON.stringify(homeDir)} && pwd`),
-      sessionName: "default",
-    }));
+    expect(queue.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "command",
+        text: expect.stringContaining(`cd ${shellQuote(homeDir)} && pwd`),
+        sessionName: "default",
+      }),
+    );
   });
 
   it("/cwd rejects paths outside allowed roots", async () => {
@@ -877,7 +909,10 @@ describe("registerHandlers", () => {
       from: { id: 1 },
     } as any);
 
-    expect(reply).toHaveBeenCalledWith("Rejected: command not allowed — use /esc · /enter · /interrupt · /up · /down · /exit · /new · /clear · or /run claude-<name> (no extra args)", undefined);
+    expect(reply).toHaveBeenCalledWith(
+      "Rejected: command not allowed by ALLOWED_RUN_PATTERNS",
+      undefined,
+    );
     expect(queue.enqueue).not.toHaveBeenCalled();
   });
 
@@ -923,7 +958,14 @@ describe("registerHandlers", () => {
       bridge: { sessionExists: vi.fn().mockResolvedValue(true) },
       config: makeConfig(),
       currentSessionManager: { get: vi.fn().mockResolvedValue("default"), set: vi.fn() },
-      queue: { size: vi.fn(), enqueue: vi.fn(), getSessionNames: vi.fn(), getSessionQueue: vi.fn(), getCurrentMessage: vi.fn(), isSessionProcessing: vi.fn() },
+      queue: {
+        size: vi.fn(),
+        enqueue: vi.fn(),
+        getSessionNames: vi.fn(),
+        getSessionQueue: vi.fn(),
+        getCurrentMessage: vi.fn(),
+        isSessionProcessing: vi.fn(),
+      },
     } as any;
 
     const { bot, commands } = buildBot();

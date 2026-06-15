@@ -28,7 +28,7 @@ git diff --quiet && git diff --cached --quiet || {
 
 git pull --ff-only origin main
 
-NEW_VERSION="$(node - <<'NODE'
+NEW_VERSION="$(node - "${BUMP}" <<'NODE'
 const fs = require("fs");
 
 const bump = process.argv[2];
@@ -57,7 +57,7 @@ pkg.version = next;
 fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`, "utf8");
 console.log(next);
 NODE
-"${BUMP}")"
+)"
 
 if [ -z "${NEW_VERSION}" ]; then
   echo "failed to compute next version" >&2
