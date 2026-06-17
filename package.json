@@ -31,18 +31,18 @@
   "dependencies": {
     "dotenv": "^17.4.2",
     "grammy": "^1.44.0",
-    "undici": "^8.4.1",
+    "undici": "^8.5.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.4.16",
+    "@biomejs/biome": "2.5.0",
     "@types/node": "^25.9.3",
     "husky": "^9.1.7",
     "lint-staged": "^17.0.7",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
     "vite": "8.0.16",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.9"
   },
   "pnpm": {
     "overrides": {
