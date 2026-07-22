@@ -30,18 +30,18 @@
   },
   "dependencies": {
     "dotenv": "^17.4.2",
-    "grammy": "^1.44.0",
-    "undici": "^8.7.0",
+    "grammy": "^1.45.1",
+    "undici": "^8.8.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.4",
+    "@biomejs/biome": "2.5.5",
     "@types/node": "^26.1.1",
     "husky": "^9.1.7",
-    "lint-staged": "^17.0.8",
+    "lint-staged": "^17.1.0",
     "tsx": "^4.23.1",
     "typescript": "^7.0.2",
-    "vite": "8.1.4",
+    "vite": "8.1.5",
     "vitest": "^4.1.10"
   },
   "pnpm": {
