@@ -31,7 +31,7 @@
   "dependencies": {
     "dotenv": "^17.4.2",
     "grammy": "^1.44.0",
-    "undici": "^8.7.0",
+    "undici": "^8.9.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
