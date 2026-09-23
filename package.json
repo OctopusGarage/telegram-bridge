@@ -29,7 +29,7 @@
     "*.{ts,js,json}": "biome check --write --no-errors-on-unmatched"
   },
   "dependencies": {
-    "dotenv": "^17.4.2",
+    "dotenv": "^18.0.1",
     "grammy": "^1.46.0",
     "undici": "^8.10.2",
     "zod": "^4.6.5"
