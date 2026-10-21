@@ -29,10 +29,10 @@
     "*.{ts,js,json}": "biome check --write --no-errors-on-unmatched"
   },
   "dependencies": {
-    "dotenv": "^18.0.7",
+    "dotenv": "^18.0.8",
     "grammy": "^1.46.0",
-    "undici": "^8.11.2",
-    "zod": "^4.6.6"
+    "undici": "^8.12.2",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
@@ -42,7 +42,7 @@
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "8.3.4",
-    "vitest": "^5.0.3"
+    "vitest": "^5.0.5"
   },
   "pnpm": {
     "overrides": {
