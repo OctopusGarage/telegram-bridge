@@ -20,6 +20,8 @@ Sometimes you do not need a full agent control plane. You just need a private Te
 - **Queue-based execution** - avoid interleaved commands and mixed responses.
 - **Fail-closed allowlist** - only configured Telegram users can control the pane.
 - **Command allowlist** - restrict `/run` to approved regex patterns.
+- **Authenticator verification** - local Google Authenticator compatible TOTP, short-lived session access, and single-use session-removal approval.
+- **Session scope** - only configured sessions are visible or controllable; terminal input and pane reads require authorization.
 - **Managed service** - install as launchd on macOS or systemd on Linux.
 - **Local state directory** - config, logs, and runtime data stay on the machine.
 
@@ -29,13 +31,14 @@ Sometimes you do not need a full agent control plane. You just need a private Te
 curl -fsSL https://raw.githubusercontent.com/OctopusGarage/telegram-bridge/main/install.sh | bash
 ```
 
-The installer creates `~/.telegram-bridge/.env`. Fill in `BOT_TOKEN`, `ALLOWED_USER_IDS`, and the tmux target, then run the installer again to start the service.
+The installer creates `~/.telegram-bridge/.env`. Fill in `BOT_TOKEN`, `ALLOWED_USER_IDS`, and the tmux target, then run `telegram-bridge security setup` in a trusted local terminal to enroll your authenticator. Restart the service after setup. Without enrollment, terminal operations stay locked.
 
 Manual development setup:
 
 ```bash
 pnpm install
 cp .env.example .env
+pnpm security setup
 pnpm run dev:local
 ```
 
@@ -49,14 +52,20 @@ TMUX_PANE=0
 ALLOWED_USER_IDS=123456789
 ALLOW_ALL_USERS=false
 ALLOWED_RUN_PATTERNS=claude(-[a-z]+)?,codex
+AUTH_SESSION_TTL_SECONDS=300
 ```
 
-Empty `ALLOWED_USER_IDS` denies everyone. Set `ALLOW_ALL_USERS=true` only for deliberate local experiments.
+Empty `ALLOWED_USER_IDS` denies everyone. Keep `ALLOW_ALL_USERS=false`; second-factor authorization always requires explicit user IDs. Setup writes `TOTP_SECRET` to the selected `.env`; never send the secret or enrollment QR through Telegram. Optionally set `ALLOWED_TMUX_SESSIONS` (empty means the default session only) and `TMUX_SOCKET` for a named tmux server.
+
+In your private bot chat, send `/unlock [session]`, check its request, then `/approve <request-id> <code>` using your authenticator. The default grant lasts five minutes for that session. Use `/lock` to revoke it. `/remove` always needs a separate approval, including while unlocked.
 
 ## Commands
 
 | Command | Purpose |
 |---|---|
+| `/unlock [session]` | Request a short-lived authenticator grant for one session. |
+| `/approve <request-id> <code>` | Approve an unlock or session-removal request once. |
+| `/lock` | Revoke your active grants and pending approval. |
 | `/run [session] <cmd>` | Send an allowed command to the tmux pane and stream new output back. |
 | `/peek [session]` | Capture and reply with current pane text. |
 | `/sessions` | List known tmux sessions. |
@@ -83,8 +92,13 @@ pnpm run service:uninstall
 - Access is denied unless a Telegram user ID is explicitly allowed.
 - Command patterns are denied by default unless configured.
 - Queue size and rate limits prevent runaway chat input.
-- The bridge controls one configured tmux target instead of arbitrary system state.
+- Every terminal write and pane read requires a private-chat, user and session scoped authenticator grant.
+- Session removal requires its own immutable, expiring, single-use approval.
+- Queued input is rechecked before delivery and discarded after restart; authorizations never survive restart.
+- `pnpm security revoke` (or `telegram-bridge security revoke`) locally suspends remote access; local `resume`, `reset` and `setup` support recovery.
 - Dev mode pauses the managed service first to avoid Telegram Bot API conflicts.
+
+TOTP submitted through Telegram is not phishing-resistant. Anyone controlling your account during an active grant can use that session. The backend and its OS account remain trusted; use a dedicated account or VM to protect host resources. Regexes and working directories are not sandboxes. Read [the security and recovery guide](docs/security.md) before deployment.
 
 ## Development
 

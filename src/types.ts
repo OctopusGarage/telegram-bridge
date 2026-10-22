@@ -5,6 +5,13 @@ export type TmuxTarget = {
 };
 
 export type AppConfig = {
+  security?: {
+    totpSecret?: string;
+    allowedSessions: string[];
+    grantTtlMs: number;
+    approvalTtlMs: number;
+    tmuxSocket?: string;
+  };
   botToken: string;
   tmuxTarget: TmuxTarget;
   pollIntervalMs: number;

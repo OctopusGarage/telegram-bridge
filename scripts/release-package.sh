@@ -34,6 +34,7 @@ REQUIRED=(
   "$ROOT_DIR/install.sh"
   "$ROOT_DIR/start.sh"
   "$ROOT_DIR/scripts"
+  "$ROOT_DIR/docs"
   "$ROOT_DIR/dist"
 )
 

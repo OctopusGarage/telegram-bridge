@@ -1,5 +1,6 @@
 import { Bot } from "grammy";
 import { fetch, ProxyAgent } from "undici";
+import { Authorization } from "./auth/authorization.js";
 import {
   BOT_COMMANDS,
   buildMiddleware,
@@ -16,21 +17,35 @@ import {
 } from "./core/instance-lock.js";
 import { detectUncleanRestart, markCleanShutdown } from "./core/lifecycle.js";
 import { MessageQueue, type PersistedMessage } from "./core/queue.js";
+import { appStateFile } from "./core/state-dir.js";
 import { CurrentSessionManager } from "./services/currentSession.js";
 import { TmuxBridge } from "./services/tmux.js";
 
 const config = loadConfig();
 if (config.allowAllUsers) {
   console.warn(
-    "[bot] ALLOW_ALL_USERS=true — user allowlist is DISABLED; anyone who reaches this bot can control your tmux pane.",
+    "[bot] ALLOW_ALL_USERS is deprecated. Second-factor authorization still requires explicit ALLOWED_USER_IDS.",
   );
 } else if (config.allowedUserIds.size === 0) {
   console.warn(
     "[bot] ALLOWED_USER_IDS is empty and ALLOW_ALL_USERS is not set — all users will be denied. Set ALLOWED_USER_IDS to grant access.",
   );
 }
-const bridge = new TmuxBridge({ target: config.tmuxTarget });
+const bridge = new TmuxBridge({ target: config.tmuxTarget, socket: config.security?.tmuxSocket });
 const currentSessionManager = new CurrentSessionManager();
+const auth = config.security
+  ? new Authorization({
+      secret: config.security.totpSecret,
+      statePath: appStateFile("security/state.json"),
+      allowedUserIds: config.allowedUserIds,
+      ...config.security,
+    })
+  : undefined;
+if (config.security && !config.security.totpSecret) {
+  console.warn(
+    "[security] Authenticator not enrolled. Terminal operations are locked; run security setup locally.",
+  );
+}
 
 const bot = new Bot(config.botToken, {
   client: {
@@ -48,7 +63,7 @@ const bot = new Bot(config.botToken, {
 
 const queue = new MessageQueue(config.maxQueueSize, undefined, config.maxConcurrentSessions);
 queue.setHandler((msg) =>
-  executeQueuedCommand(msg, { bridge, config, currentSessionManager, queue }),
+  executeQueuedCommand(msg, { bridge, config, currentSessionManager, queue, auth }),
 );
 
 // Apply user allowlist + rate limit middleware
@@ -59,6 +74,12 @@ if (restored.length > 0) {
   console.log(`[bot] Restored ${restored.length} queued message(s) from previous shutdown`);
   queue.clearPersisted();
   for (const msg of restored) {
+    if (auth) {
+      console.warn(
+        "[security] Discarded a restored action: second-factor authorization never survives restart.",
+      );
+      continue;
+    }
     const result = queue.enqueue({
       id: msg.id,
       text: msg.text,
@@ -78,7 +99,7 @@ if (restored.length > 0) {
   }
 }
 
-registerHandlers(bot, { bridge, config, currentSessionManager, queue });
+registerHandlers(bot, { bridge, config, currentSessionManager, queue, auth });
 
 // Global error boundary: without bot.catch, any error thrown while handling an
 // update (e.g. a command targeting a tmux session that doesn't exist) becomes an
