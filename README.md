@@ -22,6 +22,7 @@ Sometimes you do not need a full agent control plane. You just need a private Te
 - **Command allowlist** - restrict `/run` to approved regex patterns.
 - **Authenticator verification** - local Google Authenticator compatible TOTP, short-lived session access, and single-use session-removal approval.
 - **Session scope** - only configured sessions are visible or controllable; terminal input and pane reads require authorization.
+- **Security warnings** - repeated denied access triggers a notification to configured users, with a cooldown to prevent alert floods.
 - **Managed service** - install as launchd on macOS or systemd on Linux.
 - **Local state directory** - config, logs, and runtime data stay on the machine.
 
@@ -57,7 +58,9 @@ AUTH_SESSION_TTL_SECONDS=300
 
 Empty `ALLOWED_USER_IDS` denies everyone. Keep `ALLOW_ALL_USERS=false`; second-factor authorization always requires explicit user IDs. Setup writes `TOTP_SECRET` to the selected `.env`; never send the secret or enrollment QR through Telegram. Optionally set `ALLOWED_TMUX_SESSIONS` (empty means the default session only) and `TMUX_SOCKET` for a named tmux server.
 
-In your private bot chat, send `/unlock [session]`. The bot sends the authorization details first, then a separate `/approve <request-id> <6-digit code>` message. Copy the second message, replace the code placeholder with your authenticator code, and send it. The default grant lasts five minutes for that session. Use `/lock` to revoke it. `/remove` always needs a separate approval, including while unlocked.
+In your private bot chat, send `/unlock [session]`. The bot sends the authorization details and a `/lock` reminder first, then a separate `/approve <request-id> <6-digit code>` message. Copy the second message, replace the code placeholder with your authenticator code, and send it. The default grant lasts five minutes for that session. Use `/lock` to revoke it. `/remove` always needs a separate approval, including while unlocked.
+
+Five denied access attempts within ten minutes trigger a Telegram security warning to configured users. Warnings have a ten-minute cooldown and never contain submitted messages or verification codes. See [security warnings](docs/security.md#security-warnings) for coverage and delivery limits.
 
 ## Commands
 

@@ -1,7 +1,12 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Bot, MiddlewareFn } from "grammy";
-import type { Authorization, Principal } from "../auth/authorization.js";
+import {
+  type Authorization,
+  type DenialReporter,
+  type Principal,
+  reportDeniedAttempt,
+} from "../auth/authorization.js";
 import { type MessageQueue, newMessageId, type QueuedMessage } from "../core/queue.js";
 import { appStateFile } from "../core/state-dir.js";
 import { validateCommand } from "../security.js";
@@ -552,7 +557,7 @@ function enqueueTextCommand(
 }
 
 // Build gramjs middleware: user allowlist + rate limit
-export function buildMiddleware(config: AppConfig): MiddlewareFn {
+export function buildMiddleware(config: AppConfig, onDenied?: DenialReporter): MiddlewareFn {
   return async (ctx, next) => {
     const userId = String(ctx.from?.id ?? "");
 
@@ -560,10 +565,12 @@ export function buildMiddleware(config: AppConfig): MiddlewareFn {
     const userAllowed =
       config.allowedUserIds.has(userId) || (!config.security && config.allowAllUsers);
     if (!userAllowed) {
+      reportDeniedAttempt(onDenied, principal(ctx), "identity");
       await safeReply(ctx, "Access denied.");
       return;
     }
     if (config.security && (ctx.chat?.type !== "private" || String(ctx.chat.id) !== userId)) {
+      reportDeniedAttempt(onDenied, principal(ctx), "private-chat");
       await safeReply(ctx, "Use a private chat with the bot.");
       return;
     }
@@ -704,6 +711,7 @@ export function registerHandlers(rawBot: Bot, deps: HandlerDeps): void {
       `Authorize terminal access to ${session} for ${Math.ceil(deps.config.security!.grantTtlMs / 1000)}s.\n` +
         `Anyone controlling this Telegram account can operate this session during that period.\n` +
         `Request expires in ${Math.ceil(deps.config.security!.approvalTtlMs / 1000)}s.\n` +
+        "When finished, send /lock to revoke access immediately.\n" +
         "Copy the next message and replace <6-digit code> with your authenticator code.",
     );
     await safeReply(ctx, `/approve ${request.id} <6-digit code>`);
@@ -750,6 +758,7 @@ export function registerHandlers(rawBot: Bot, deps: HandlerDeps): void {
       "/unlock [session] — request verification and a separate approval command to copy\n" +
         "/approve <request-id> <code> — approve one request\n" +
         "/lock — revoke your authorizations\n" +
+        "Security warnings: 5 denied access attempts in 10 minutes; 10-minute alert cooldown.\n" +
         "/peek [session] — capture tmux pane text\n" +
         "/esc [session] — send Escape key\n" +
         "/enter [session] — send Enter key\n" +

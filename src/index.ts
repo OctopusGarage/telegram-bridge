@@ -1,6 +1,7 @@
 import { Bot } from "grammy";
 import { fetch, ProxyAgent } from "undici";
-import { Authorization } from "./auth/authorization.js";
+import { SecurityAlerts } from "./auth/alerts.js";
+import { Authorization, type DenialReporter } from "./auth/authorization.js";
 import {
   BOT_COMMANDS,
   buildMiddleware,
@@ -33,14 +34,6 @@ if (config.allowAllUsers) {
 }
 const bridge = new TmuxBridge({ target: config.tmuxTarget, socket: config.security?.tmuxSocket });
 const currentSessionManager = new CurrentSessionManager();
-const auth = config.security
-  ? new Authorization({
-      secret: config.security.totpSecret,
-      statePath: appStateFile("security/state.json"),
-      allowedUserIds: config.allowedUserIds,
-      ...config.security,
-    })
-  : undefined;
 if (config.security && !config.security.totpSecret) {
   console.warn(
     "[security] Authenticator not enrolled. Terminal operations are locked; run security setup locally.",
@@ -61,13 +54,30 @@ const bot = new Bot(config.botToken, {
   },
 });
 
+const alerts = new SecurityAlerts({
+  recipients: config.allowedUserIds,
+  send: (recipient, text) => bot.api.sendMessage(recipient, text),
+});
+const reportDenied: DenialReporter = (attempt) => {
+  void alerts.record(attempt);
+};
+const auth = config.security
+  ? new Authorization({
+      secret: config.security.totpSecret,
+      statePath: appStateFile("security/state.json"),
+      allowedUserIds: config.allowedUserIds,
+      ...config.security,
+      onDenied: reportDenied,
+    })
+  : undefined;
+
 const queue = new MessageQueue(config.maxQueueSize, undefined, config.maxConcurrentSessions);
 queue.setHandler((msg) =>
   executeQueuedCommand(msg, { bridge, config, currentSessionManager, queue, auth }),
 );
 
 // Apply user allowlist + rate limit middleware
-bot.use(buildMiddleware(config));
+bot.use(buildMiddleware(config, reportDenied));
 
 const restored: PersistedMessage[] = queue.loadPersisted();
 if (restored.length > 0) {

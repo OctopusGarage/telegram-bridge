@@ -3,6 +3,23 @@ import { Secret, TOTP } from "otpauth";
 import { revokeSecurityState, withSecurityState } from "./state.js";
 
 export type Principal = { userId: string; chatId: string };
+export type DeniedAttempt = Principal & {
+  reason: "identity" | "private-chat" | "session" | "authorization" | "verification" | "approval";
+};
+export type DenialReporter = (attempt: DeniedAttempt) => void;
+
+export function reportDeniedAttempt(
+  reporter: DenialReporter | undefined,
+  principal: Principal,
+  reason: DeniedAttempt["reason"],
+): void {
+  try {
+    reporter?.({ ...principal, reason });
+  } catch {
+    // Monitoring must never replace or bypass an access denial.
+  }
+}
+
 type Request = Readonly<{
   id: string;
   kind: "unlock" | "remove";
@@ -26,6 +43,7 @@ export type AuthorizationOptions = {
   grantTtlMs: number;
   approvalTtlMs: number;
   now?: () => number;
+  onDenied?: DenialReporter;
 };
 
 export class Authorization {
@@ -41,22 +59,28 @@ export class Authorization {
     return `${p.userId}:${p.chatId}`;
   }
 
+  private deny(p: Principal, reason: DeniedAttempt["reason"], message: string): never {
+    reportDeniedAttempt(this.options.onDenied, p, reason);
+    throw new Error(message);
+  }
+
   checkIdentity(p: Principal, session?: string): void {
-    if (!this.options.allowedUserIds.has(p.userId)) throw new Error("Access denied");
-    if (!p.userId || p.chatId !== p.userId) throw new Error("Use a private chat with the bot");
+    if (!this.options.allowedUserIds.has(p.userId)) this.deny(p, "identity", "Access denied");
+    if (!p.userId || p.chatId !== p.userId)
+      this.deny(p, "private-chat", "Use a private chat with the bot");
     if (session !== undefined && !this.isSessionAllowed(session))
-      throw new Error("Session not allowed");
+      this.deny(p, "session", "Session not allowed");
   }
 
   isSessionAllowed(session: string): boolean {
     return this.options.allowedSessions.includes(session);
   }
 
-  private generation(): string {
+  private generation(p: Principal): string {
     return withSecurityState(this.options.statePath, (state) => {
-      if (state.suspended) throw new Error("Remote access suspended locally");
+      if (state.suspended) this.deny(p, "authorization", "Remote access suspended locally");
       if (state.secretFingerprint && state.secretFingerprint !== this.fingerprint()) {
-        throw new Error("Authenticator changed locally; restart the backend");
+        this.deny(p, "authorization", "Authenticator changed locally; restart the backend");
       }
       return state.generation;
     });
@@ -71,14 +95,14 @@ export class Authorization {
   request(p: Principal, kind: "unlock" | "remove", session: string, target?: string): Request {
     this.checkIdentity(p, session);
     if (!this.options.secret)
-      throw new Error("Run security setup locally to enroll an authenticator");
+      this.deny(p, "authorization", "Run security setup locally to enroll an authenticator");
     const request = Object.freeze({
       id: randomUUID().replaceAll("-", "").slice(0, 16),
       kind,
       session,
       target,
       expiresAt: this.now() + this.options.approvalTtlMs,
-      generation: this.generation(),
+      generation: this.generation(p),
     });
     this.requests.set(this.key(p), request);
     this.approvals.delete(this.key(p));
@@ -89,13 +113,14 @@ export class Authorization {
     this.checkIdentity(p);
     const key = this.key(p);
     const request = this.requests.get(key);
-    if (!request || request.id !== requestId) throw new Error("Approval request not found");
+    if (!request || request.id !== requestId)
+      this.deny(p, "approval", "Approval request not found");
     this.checkIdentity(p, request.session);
     if (request.expiresAt <= this.now()) {
       this.requests.delete(key);
-      throw new Error("Approval request expired");
+      this.deny(p, "approval", "Approval request expired");
     }
-    if (!this.options.secret) throw new Error("Enroll an authenticator locally");
+    if (!this.options.secret) this.deny(p, "authorization", "Enroll an authenticator locally");
     const now = this.now();
     const totp = new TOTP({
       secret: Secret.fromBase32(this.options.secret),
@@ -127,7 +152,7 @@ export class Authorization {
       state.blockedUntil = 0;
       return null;
     });
-    if (error) throw new Error(error);
+    if (error) this.deny(p, "verification", error);
     this.requests.delete(key);
     if (request.kind === "unlock") {
       this.grants.set(`${key}:${request.session}`, {
@@ -147,10 +172,12 @@ export class Authorization {
     this.checkIdentity(p, request.session);
     const key = this.key(p);
     if (this.approvals.get(key) !== request)
-      throw new Error("Approval revoked or already consumed");
+      this.deny(p, "approval", "Approval revoked or already consumed");
     this.approvals.delete(key);
-    if (request.expiresAt <= this.now()) throw new Error("Approval expired before execution");
-    if (request.generation !== this.generation()) throw new Error("Authorization revoked locally");
+    if (request.expiresAt <= this.now())
+      this.deny(p, "approval", "Approval expired before execution");
+    if (request.generation !== this.generation(p))
+      this.deny(p, "authorization", "Authorization revoked locally");
   }
 
   authorize(p: Principal, session: string, expectedGrant?: string, target?: string): string {
@@ -159,14 +186,18 @@ export class Authorization {
     if (
       !grant ||
       grant.expiresAt <= this.now() ||
-      grant.generation !== this.generation() ||
+      grant.generation !== this.generation(p) ||
       (expectedGrant !== undefined && expectedGrant !== grant.id)
     ) {
-      throw new Error("Session locked. Use /unlock to verify with your authenticator");
+      this.deny(
+        p,
+        "authorization",
+        "Session locked. Use /unlock to verify with your authenticator",
+      );
     }
     if (target !== undefined) {
       if (grant.target !== undefined && grant.target !== target) {
-        throw new Error("Target pane changed; unlock this session again");
+        this.deny(p, "authorization", "Target pane changed; unlock this session again");
       }
       grant.target = target;
     }
