@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Bot, MiddlewareFn } from "grammy";
+import type { Authorization, Principal } from "../auth/authorization.js";
 import { type MessageQueue, newMessageId, type QueuedMessage } from "../core/queue.js";
 import { appStateFile } from "../core/state-dir.js";
 import { validateCommand } from "../security.js";
@@ -145,6 +146,7 @@ async function appendRecentWorkdir(newPath: string): Promise<void> {
 }
 
 async function switchToDir(ctx: any, idx: number, deps: HandlerDeps): Promise<void> {
+  if (deps.auth) await resolveHandlerContext(null, deps, ctx);
   const lines = readRecentWorkdirLines();
   if (lines.length === 0) {
     await safeReply(ctx, "No recent directories.");
@@ -171,9 +173,13 @@ async function switchToDir(ctx: any, idx: number, deps: HandlerDeps): Promise<vo
   }
 
   try {
-    const { session } = await resolveHandlerContext(null, deps);
-    await deps.bridge.ensurePaneExists(session);
-    await deps.bridge.sendCommand(`cd ${shellQuote(targetPath)} && pwd`, session);
+    if (deps.auth) {
+      await enqueueAction(ctx, null, "command", `cd ${shellQuote(targetPath)} && pwd`, deps, "cwd");
+    } else {
+      const { session } = await resolveHandlerContext(null, deps);
+      await deps.bridge.ensurePaneExists(session);
+      await deps.bridge.sendCommand(`cd ${shellQuote(targetPath)} && pwd`, session);
+    }
     await appendRecentWorkdir(targetPath);
     await safeReply(ctx, `✅ cd to ${targetPath}`);
   } catch (err) {
@@ -187,13 +193,13 @@ export async function switchToSession(
   deps: HandlerDeps,
 ): Promise<void> {
   try {
-    const sessions = await deps.bridge.listSessionNames();
+    const sessions = await allowedSessionNames(deps);
     let sessionName: string | null = null;
 
     if (typeof idOrIdx === "string" && /^[a-zA-Z0-9]{6}$/.test(idOrIdx)) {
       sessionName = resolveSessionByShortId(sessions, idOrIdx);
     } else if (typeof idOrIdx === "number") {
-      const current = await deps.currentSessionManager.get();
+      const current = await deps.currentSessionManager.get(selectionScope(ctx, deps));
       const currentIdx = current ? sessions.indexOf(current) : -1;
       const prepend = current && currentIdx > 0 ? sessions[currentIdx] : null;
       const rest = prepend ? sessions.filter((_, i) => i !== currentIdx) : sessions;
@@ -207,7 +213,9 @@ export async function switchToSession(
       await safeReply(ctx, `Session not found for \`${idOrIdx}\`.`);
       return;
     }
-    await deps.currentSessionManager.set(sessionName);
+    deps.auth?.checkIdentity(principal(ctx), sessionName);
+    if (deps.auth) await deps.currentSessionManager.set(sessionName, selectionScope(ctx, deps));
+    else await deps.currentSessionManager.set(sessionName);
     await safeReply(ctx, `✅ Switched to ${sessionName}`);
   } catch (err) {
     await safeReply(ctx, `Failed: ${errMessage(err)}`);
@@ -220,13 +228,13 @@ export async function removeSession(
   deps: HandlerDeps,
 ): Promise<void> {
   try {
-    const sessions = await deps.bridge.listSessionNames();
+    const sessions = await allowedSessionNames(deps);
     let sessionName: string | null = null;
 
     if (typeof idOrIdx === "string" && /^[a-zA-Z0-9]{6}$/.test(idOrIdx)) {
       sessionName = resolveSessionByShortId(sessions, idOrIdx);
     } else if (typeof idOrIdx === "number") {
-      const current = await deps.currentSessionManager.get();
+      const current = await deps.currentSessionManager.get(selectionScope(ctx, deps));
       const currentIdx = current ? sessions.indexOf(current) : -1;
       const prepend = current && currentIdx > 0 ? sessions[currentIdx] : null;
       const rest = prepend ? sessions.filter((_, i) => i !== currentIdx) : sessions;
@@ -240,6 +248,16 @@ export async function removeSession(
       await safeReply(ctx, `Session not found for \`${idOrIdx}\`.`);
       return;
     }
+    if (deps.auth) {
+      const target = await deps.bridge.paneIdentity(sessionName);
+      const request = deps.auth.request(principal(ctx), "remove", sessionName, target);
+      await safeReply(
+        ctx,
+        `Confirm removal of session ${sessionName}. This cancels queued work.\n` +
+          `Expires in ${Math.ceil(deps.config.security!.approvalTtlMs / 1000)}s.\n/approve ${request.id} <6-digit code>`,
+      );
+      return;
+    }
     await deps.bridge.killSession(sessionName);
     await safeReply(ctx, `✅ Removed session ${sessionName}`);
   } catch (err) {
@@ -249,6 +267,9 @@ export async function removeSession(
 
 export const BOT_COMMANDS: BotCommand[] = [
   { command: "help", description: "Show all commands" },
+  { command: "unlock", description: "Request authenticator verification for a session" },
+  { command: "approve", description: "Approve a request with a one-time code" },
+  { command: "lock", description: "Revoke your active session authorizations" },
   { command: "peek", description: "Capture tmux pane" },
   { command: "esc", description: "Send Escape key" },
   { command: "enter", description: "Send Enter key" },
@@ -304,11 +325,25 @@ export function stopRateLimitCleanup(): void {
 }
 
 type HandlerDeps = {
+  auth?: Authorization;
   bridge: TmuxBridge;
   config: AppConfig;
   currentSessionManager: CurrentSessionManager;
   queue: MessageQueue;
 };
+
+function principal(ctx: any): Principal {
+  return { userId: String(ctx.from?.id ?? ""), chatId: String(ctx.chat?.id ?? "") };
+}
+
+function selectionScope(ctx: any, deps: HandlerDeps): string | undefined {
+  return deps.auth ? `${principal(ctx).userId}:${principal(ctx).chatId}` : undefined;
+}
+
+async function allowedSessionNames(deps: HandlerDeps): Promise<string[]> {
+  const sessions = await deps.bridge.listSessionNames();
+  return deps.auth ? sessions.filter((session) => deps.auth!.isSessionAllowed(session)) : sessions;
+}
 
 const RAW_KEY_COMMANDS: Record<string, string[]> = {
   esc: ["Escape"],
@@ -353,18 +388,23 @@ function getBridge(deps: HandlerDeps, _session: string | null): TmuxBridge {
 export async function resolveHandlerContext(
   arg: string | null,
   deps: HandlerDeps,
+  ctx?: any,
 ): Promise<{ bridge: TmuxBridge; session: string }> {
   const effectiveArg = arg === null || arg === "" ? null : arg;
 
   // Only read saved session from file when no explicit arg provided
-  const savedSession = effectiveArg === null ? await deps.currentSessionManager.get() : null;
+  const savedSession =
+    effectiveArg === null ? await deps.currentSessionManager.get(selectionScope(ctx, deps)) : null;
   const explicit = effectiveArg ?? savedSession;
+  if (deps.auth) deps.auth.authorize(principal(ctx), explicit || deps.config.tmuxTarget.session);
 
   // An explicitly-specified session (command arg or saved current session) is
   // only honored if it actually exists — never fabricate an arbitrary name.
   if (explicit && (await deps.bridge.sessionExists(explicit))) {
     return { bridge: getBridge(deps, explicit), session: explicit };
   }
+  if (deps.auth && explicit)
+    throw new Error("Selected session no longer exists; select a session again");
 
   // Otherwise fall back to the configured default session, creating that default
   // on demand only when a command is received and it doesn't exist yet.
@@ -381,7 +421,37 @@ export async function resolveHandlerContext(
 export async function executeQueuedCommand(msg: QueuedMessage, deps: HandlerDeps): Promise<void> {
   const session = msg.sessionName;
   try {
+    if (deps.config.security && !deps.auth) throw new Error("Authorization service unavailable");
+    if (deps.auth) {
+      const security = msg.security;
+      if (!security || String(msg.chatId) !== security.chatId)
+        throw new Error("Queued authorization missing");
+      const p = { userId: security.userId, chatId: security.chatId };
+      deps.auth.authorize(p, session, security.grantId);
+      if (
+        security.createdAt > Date.now() ||
+        Date.now() - security.createdAt > deps.config.security!.grantTtlMs
+      ) {
+        throw new Error("Queued action expired");
+      }
+      if (
+        security.source === "run" &&
+        !validateCommand(msg.text, deps.config.allowedRunPatterns).ok
+      ) {
+        throw new Error("Command no longer allowed");
+      }
+      if (security.target !== (await deps.bridge.paneIdentity(session)))
+        throw new Error("Target pane changed");
+      deps.auth.authorize(p, session, security.grantId);
+    }
     await deps.bridge.ensurePaneExists(session);
+    if (deps.auth && msg.security) {
+      deps.auth.authorize(
+        { userId: msg.security.userId, chatId: msg.security.chatId },
+        session,
+        msg.security.grantId,
+      );
+    }
     if (msg.action === "raw-key") {
       await deps.bridge.sendRawKey(msg.text, session);
       msg.resolve(`✅ Sent ${msg.text} to ${session}`);
@@ -404,8 +474,20 @@ async function enqueueAction(
   action: string,
   value: string,
   deps: HandlerDeps,
+  source: "run" | "cwd" | "key" = action === "raw-key" ? "key" : "run",
 ): Promise<void> {
-  const { session } = await resolveHandlerContext(sessionArg, deps);
+  const { session } = await resolveHandlerContext(sessionArg, deps, ctx);
+  const target = deps.auth ? await deps.bridge.paneIdentity(session) : undefined;
+  const security = deps.auth
+    ? {
+        ...principal(ctx),
+        grantId: deps.auth.authorize(principal(ctx), session),
+        target: target!,
+        createdAt: Date.now(),
+        source,
+      }
+    : undefined;
+  if (deps.auth) deps.auth.authorize(principal(ctx), session, security!.grantId, target);
   const now = Date.now();
   const chatId = String(ctx.chat?.id ?? "");
   const userSessionKey = `${chatId}:${session}`;
@@ -425,6 +507,7 @@ async function enqueueAction(
 
   const queueSizeBefore = deps.queue.size(session);
   const verdict = deps.queue.enqueue({
+    security,
     id: newMessageId(),
     text: value,
     chatId: ctx.chat?.id ?? 0,
@@ -473,17 +556,29 @@ export function buildMiddleware(config: AppConfig): MiddlewareFn {
   return async (ctx, next) => {
     const userId = String(ctx.from?.id ?? "");
 
-    // User allowlist check (fail closed): access requires either an explicit
-    // ALLOW_ALL_USERS opt-in or membership in the allowlist. An empty allowlist
-    // therefore denies everyone instead of allowing the world.
-    const userAllowed = config.allowAllUsers || config.allowedUserIds.has(userId);
+    // Secure runtimes always require explicit user IDs, even with the legacy flag.
+    const userAllowed =
+      config.allowedUserIds.has(userId) || (!config.security && config.allowAllUsers);
     if (!userAllowed) {
       await safeReply(ctx, "Access denied.");
       return;
     }
+    if (config.security && (ctx.chat?.type !== "private" || String(ctx.chat.id) !== userId)) {
+      await safeReply(ctx, "Use a private chat with the bot.");
+      return;
+    }
 
-    // Rate limit check
-    if (userId) {
+    const text = ctx.message && "text" in ctx.message ? ctx.message.text : "";
+    if (config.security && /^\/approve(?:@\w+)?(?:\s|$)/.test(text ?? "")) {
+      try {
+        await ctx.deleteMessage();
+      } catch {
+        /* Delete even when ordinary throttling rejects approval. */
+      }
+    }
+    // Emergency locking must remain available while ordinary input is throttled.
+    const locking = config.security && /^\/lock(?:@\w+)?\s*$/.test(text ?? "");
+    if (userId && !locking) {
       const last = rateLimit.get(userId);
       const now = Date.now();
       if (last !== undefined && now - last < config.rateLimitMs) {
@@ -525,15 +620,15 @@ function shortenForStatus(text: string, maxLen = QUEUE_STATUS_MAX_PREVIEW): stri
   return `${text.slice(0, maxLen - 1)}…`;
 }
 
-function formatQueueStatus(deps: HandlerDeps): string {
+function formatQueueStatus(deps: HandlerDeps, session?: string): string {
   const lines: string[] = [];
-  const total = deps.queue.size();
+  const total = deps.queue.size(session);
   lines.push(
     `📬 Queue status (max per session: ${deps.config.maxQueueSize}, concurrent sessions: ${deps.config.maxConcurrentSessions})`,
   );
   lines.push(`Queued items: ${total}`);
 
-  const sessions = deps.queue.getSessionNames().sort();
+  const sessions = session ? [session] : deps.queue.getSessionNames().sort();
   if (sessions.length === 0) {
     lines.push("No pending messages.");
     return lines.join("\n");
@@ -572,13 +667,88 @@ export function formatSessionsList(sessions: string[], current: string | null): 
   return `📌 Current: ${current ?? "(none)"}\n\n${lines.join("\n\n")}`;
 }
 
-export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
+export function registerHandlers(rawBot: Bot, deps: HandlerDeps): void {
+  if (deps.config.security && !deps.auth) throw new Error("Authorization service unavailable");
+  const guard = (handler: (ctx: any) => Promise<void>, name?: string) => async (ctx: any) => {
+    deps.auth?.checkIdentity(principal(ctx));
+    if (
+      deps.auth &&
+      name &&
+      ["cwd", "list_recent_workdir", "clear_recent_workdir", "queue_status"].includes(name)
+    ) {
+      await resolveHandlerContext(null, deps, ctx);
+    }
+    await handler(ctx);
+  };
+  const bot = {
+    command: (name: string, handler: (ctx: any) => Promise<void>) =>
+      rawBot.command(name, guard(handler, name)),
+    on: (event: "message:text", handler: (ctx: any) => Promise<void>) =>
+      rawBot.on(event, guard(handler)),
+  };
   startRateLimitCleanup();
+
+  bot.command("unlock", async (ctx) => {
+    if (!deps.auth) return safeReply(ctx, "Second-factor authorization is unavailable.");
+    const session =
+      String(ctx.match ?? "").trim() ||
+      (await deps.currentSessionManager.get(selectionScope(ctx, deps))) ||
+      deps.config.tmuxTarget.session;
+    deps.auth.checkIdentity(principal(ctx), session);
+    const target = (await deps.bridge.sessionExists(session))
+      ? await deps.bridge.paneIdentity(session)
+      : undefined;
+    const request = deps.auth.request(principal(ctx), "unlock", session, target);
+    await safeReply(
+      ctx,
+      `Authorize terminal access to ${session} for ${Math.ceil(deps.config.security!.grantTtlMs / 1000)}s.\n` +
+        `Anyone controlling this Telegram account can operate this session during that period.\n` +
+        `Request expires in ${Math.ceil(deps.config.security!.approvalTtlMs / 1000)}s.\n/approve ${request.id} <6-digit code>`,
+    );
+  });
+
+  bot.command("approve", async (ctx) => {
+    // Best-effort deletion reduces chat history exposure; never echo or log OTP input.
+    try {
+      await ctx.deleteMessage();
+    } catch {
+      /* Telegram deletion may be unavailable. */
+    }
+    if (!deps.auth) return safeReply(ctx, "Second-factor authorization is unavailable.");
+    const match = /^([a-f0-9]{16})\s+(\S+)$/.exec(String(ctx.match ?? "").trim());
+    if (!match) return safeReply(ctx, "Usage: /approve <request-id> <6-digit code>");
+    const approved = deps.auth.confirm(principal(ctx), match[1]!, match[2]!);
+    if (approved.kind === "remove") {
+      if (approved.target !== (await deps.bridge.paneIdentity(approved.session))) {
+        throw new Error("Target pane changed; request removal again");
+      }
+      deps.auth.checkIdentity(principal(ctx), approved.session);
+      // Check local revocation once more after awaiting tmux; approval never grants general access.
+      deps.auth.consumeApproval(principal(ctx), approved);
+      deps.auth.lockSession(approved.session);
+      deps.queue.clearSession(approved.session);
+      await deps.bridge.killSession(approved.session);
+      await safeReply(ctx, `✅ Removed session ${approved.session}`);
+      return;
+    }
+    await safeReply(ctx, `✅ Authorized ${approved.session}. Use /lock to revoke access.`);
+  });
+
+  bot.command("lock", async (ctx) => {
+    deps.auth?.lock(principal(ctx));
+    await safeReply(
+      ctx,
+      "🔒 Your session authorizations and pending approval have been revoked. Queued actions will be rejected.",
+    );
+  });
 
   bot.command("help", async (ctx) => {
     await safeReply(
       ctx,
-      "/peek [session] — capture tmux pane text\n" +
+      "/unlock [session] — request authenticator verification\n" +
+        "/approve <request-id> <code> — approve one request\n" +
+        "/lock — revoke your authorizations\n" +
+        "/peek [session] — capture tmux pane text\n" +
         "/esc [session] — send Escape key\n" +
         "/enter [session] — send Enter key\n" +
         "/interrupt [session] — send Ctrl-C\n" +
@@ -604,10 +774,13 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
   bot.command("peek", async (ctx) => {
     const raw = ctx.match?.trim() ?? "";
     const arg = raw === "" ? null : raw;
-    const { bridge, session } = await resolveHandlerContext(arg, deps);
+    const { bridge, session } = await resolveHandlerContext(arg, deps, ctx);
     try {
       await bridge.ensurePaneExists(session);
+      if (deps.auth)
+        deps.auth.authorize(principal(ctx), session, undefined, await bridge.paneIdentity(session));
       const snapshot = await bridge.capturePane(session);
+      deps.auth?.authorize(principal(ctx), session);
       const trimmed = snapshot.trim();
       const content = escapeHtml(trimmed.slice(-3500));
       await safeReply(
@@ -637,13 +810,18 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
   }
 
   bot.command("queue_status", async (ctx) => {
+    if (deps.auth) {
+      const { session } = await resolveHandlerContext(null, deps, ctx);
+      await safeReply(ctx, formatQueueStatus(deps, session));
+      return;
+    }
     await safeReply(ctx, formatQueueStatus(deps));
   });
 
   bot.command("sessions", async (ctx) => {
     try {
-      const sessions = await deps.bridge.listSessionNames();
-      const current = await deps.currentSessionManager.get();
+      const sessions = await allowedSessionNames(deps);
+      const current = await deps.currentSessionManager.get(selectionScope(ctx, deps));
       const body = formatSessionsList(sessions, current);
       await safeReply(ctx, `🖥️ tmux sessions:\n\n${body}`);
     } catch (err) {
@@ -744,7 +922,7 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
     }
 
     await appendRecentWorkdir(realPath);
-    await enqueueAction(ctx, null, "command", `cd ${shellQuote(realPath)} && pwd`, deps);
+    await enqueueAction(ctx, null, "command", `cd ${shellQuote(realPath)} && pwd`, deps, "cwd");
   });
 
   bot.command("run", async (ctx) => {
@@ -759,6 +937,15 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
 
   bot.on("message:text", async (ctx) => {
     const text = ctx.message.text;
+    if (/^\s*\d{6}\s*$/.test(text)) {
+      try {
+        await ctx.deleteMessage();
+      } catch {
+        /* Best-effort cleanup only. */
+      }
+      await safeReply(ctx, "Use /approve <request-id> <code> to approve an existing request.");
+      return;
+    }
 
     const cwdMatch = text.match(/^\/cwd_(\d+)(?:\s|$)/);
     if (cwdMatch) {

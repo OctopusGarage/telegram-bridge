@@ -4,6 +4,14 @@ import * as nodePath from "node:path";
 import { appStateFile } from "./state-dir.js";
 
 export type QueuedMessage = {
+  security?: {
+    userId: string;
+    chatId: string;
+    grantId: string;
+    target: string;
+    createdAt: number;
+    source: "run" | "cwd" | "key";
+  };
   id: string;
   text: string;
   chatId: string | number;

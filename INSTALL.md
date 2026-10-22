@@ -34,3 +34,11 @@ If your repo is not `OctopusGarage/telegram-bridge`, set `TGB_REPO=owner/name` o
 
 - macOS/Linux: `pnpm run service:install` and status with `pnpm run service:status`
 - Linux service is backed by `systemd --user`; macOS is `launchd`.
+
+## Authenticator setup
+
+After configuring the installed `.env`, run `telegram-bridge security setup` in a trusted
+local terminal, scan the QR with Google Authenticator, verify its code, and restart the
+service. Terminal access stays locked until enrollment. In Telegram, use `/unlock` and
+then `/approve <request-id> <code>`. See [the security guide](docs/security.md) for session
+scope, emergency `security revoke`, local recovery and deployment isolation.

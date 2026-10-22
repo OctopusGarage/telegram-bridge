@@ -14,6 +14,10 @@ afterEach(() => {
 });
 
 describe("stateDir", () => {
+  it("treats the empty example override as unset", () => {
+    process.env.TGB_STATE_DIR = "";
+    expect(stateDir("/fallback")).toBe("/fallback");
+  });
   it("falls back to default app state dir", () => {
     delete process.env.TGB_STATE_DIR;
     expect(stateDir("/fallback")).toBe("/fallback");

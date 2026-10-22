@@ -5,7 +5,7 @@ import * as path from "node:path";
  * Low-level primitive: explicit state dir override, or the fallback path.
  */
 export function stateDir(fallback: string): string {
-  return process.env.TGB_STATE_DIR ?? fallback;
+  return process.env.TGB_STATE_DIR?.trim() || fallback;
 }
 
 /**
