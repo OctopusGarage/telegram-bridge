@@ -6,7 +6,7 @@ pane capture, directory/history operation and queue-status request needs a curre
 | Command | Behavior | Second factor |
 |---------|----------|---------------|
 | `/help` | Show command usage | No |
-| `/unlock [session]` | Request interactive access to one allowed session | Creates approval request |
+| `/unlock [session]` | Request access; receive details and a separate approval command to copy | Creates approval request |
 | `/approve <request-id> <code>` | Verify a six-digit TOTP for the exact request | Single use |
 | `/lock` | Revoke your grants and pending approval | No |
 | `/peek [session]` | Capture pane text | Session grant |

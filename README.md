@@ -57,7 +57,7 @@ AUTH_SESSION_TTL_SECONDS=300
 
 Empty `ALLOWED_USER_IDS` denies everyone. Keep `ALLOW_ALL_USERS=false`; second-factor authorization always requires explicit user IDs. Setup writes `TOTP_SECRET` to the selected `.env`; never send the secret or enrollment QR through Telegram. Optionally set `ALLOWED_TMUX_SESSIONS` (empty means the default session only) and `TMUX_SOCKET` for a named tmux server.
 
-In your private bot chat, send `/unlock [session]`, check its request, then `/approve <request-id> <code>` using your authenticator. The default grant lasts five minutes for that session. Use `/lock` to revoke it. `/remove` always needs a separate approval, including while unlocked.
+In your private bot chat, send `/unlock [session]`. The bot sends the authorization details first, then a separate `/approve <request-id> <6-digit code>` message. Copy the second message, replace the code placeholder with your authenticator code, and send it. The default grant lasts five minutes for that session. Use `/lock` to revoke it. `/remove` always needs a separate approval, including while unlocked.
 
 ## Commands
 

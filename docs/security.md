@@ -37,7 +37,8 @@ are trusted operators of that same key. This is not a multi-tenant identity syst
 
 ## Telegram workflow
 
-1. Send `/unlock [session]`. The bot describes the target and authorization duration.
+1. Send `/unlock [session]`. The bot describes the target and authorization duration in
+   one message, followed by a separate approval command you can copy and edit.
 2. Check the request, then send `/approve <request-id> <six-digit-code>`.
 3. Use the existing commands normally. Authorization applies only to that user, private
    chat, session and pane generation. Each configured session requires its own unlock.
