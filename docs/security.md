@@ -37,8 +37,9 @@ are trusted operators of that same key. This is not a multi-tenant identity syst
 
 ## Telegram workflow
 
-1. Send `/unlock [session]`. The bot describes the target and authorization duration in
-   one message, followed by a separate approval command you can copy and edit.
+1. Send `/unlock [session]`. The bot describes the target and authorization duration,
+   with a reminder to send `/lock` when finished. A separate approval command follows
+   so you can copy and edit it.
 2. Check the request, then send `/approve <request-id> <six-digit-code>`.
 3. Use the existing commands normally. Authorization applies only to that user, private
    chat, session and pane generation. Each configured session requires its own unlock.
@@ -68,6 +69,28 @@ Approval messages are deleted on a best-effort basis and codes are never echoed 
 in the execution queue. Deletion does not guarantee removal from Telegram, notifications
 or other logged-in devices. If deletion fails, manually remove the message.
 Bare six-digit messages also receive best-effort deletion and are not echoed.
+
+## Security warnings
+
+Five denied access attempts in a rolling ten-minute window trigger a plain-text Telegram
+warning to each user in `ALLOWED_USER_IDS`, never to an unlisted sender or a group. The
+counter is shared across senders. It covers user/private-chat/session policy denials,
+locked or expired terminal grants, and failed, expired or invalid approval verification.
+Ordinary throttling, command syntax errors and command-pattern rejections do not count.
+Successful authorization does not count and does not erase other recent denials.
+
+Warnings include the latest sender's numeric user ID, a fixed rejection category, `/lock`
+and local `telegram-bridge security revoke` recovery guidance. Submitted text, commands,
+request IDs and verification codes are never included. There is a ten-minute installation-
+wide cooldown; attempts during cooldown do not build up another warning. Counting resumes
+afterward. The bounded counter and cooldown live in memory and reset on backend restart;
+the separate persistent OTP failure lockout is unchanged.
+
+Delivery is best effort. Recipients must have started a private chat with the bot. A
+delivery failure logs a generic warning, preserves the cooldown and never permits access
+or prevents delivery to the other configured users. This is an alert, not an additional
+automatic lockout. The same Telegram account receives it, so it is not an independent
+notification channel if that account is compromised. Local revocation remains available.
 
 ## Revocation and recovery
 

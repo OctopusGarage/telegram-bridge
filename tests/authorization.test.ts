@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Secret, TOTP } from "otpauth";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Authorization } from "../src/auth/authorization.js";
 import { resumeSecurityState, withSecurityState } from "../src/auth/state.js";
 
@@ -21,6 +21,7 @@ function fixture() {
     grantTtlMs: 60_000,
     approvalTtlMs: 30_000,
     now: () => now,
+    onDenied: vi.fn(),
   };
   const otp = () =>
     new TOTP({ secret: Secret.fromBase32(secret), digits: 6 }).generate({ timestamp: now });
@@ -38,6 +39,26 @@ afterEach(() => {
 });
 
 describe("authorization", () => {
+  it("reports denied terminal access and failed verification without exposing the code", () => {
+    const f = fixture();
+    expect(() => f.auth.authorize(principal, "work")).toThrow(/locked/i);
+    expect(f.options.onDenied).toHaveBeenLastCalledWith({ ...principal, reason: "authorization" });
+    const request = f.auth.request(principal, "unlock", "work");
+    expect(() => f.auth.confirm(principal, request.id, "private-otp-input")).toThrow();
+    expect(f.options.onDenied).toHaveBeenLastCalledWith({ ...principal, reason: "verification" });
+    expect(JSON.stringify(f.options.onDenied.mock.calls)).not.toContain("private-otp-input");
+    f.auth.confirm(principal, request.id, f.otp());
+    f.auth.authorize(principal, "work");
+    expect(f.options.onDenied).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps access denied when the notification callback fails", () => {
+    const f = fixture();
+    f.options.onDenied.mockImplementation(() => {
+      throw new Error("notification unavailable");
+    });
+    expect(() => f.auth.authorize(principal, "work")).toThrow(/locked/i);
+  });
   it("accepts the six-digit RFC SHA-1 vector at 59 seconds", () => {
     const f = fixture();
     const request = f.auth.request(principal, "unlock", "work");

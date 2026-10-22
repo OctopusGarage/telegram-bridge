@@ -160,11 +160,15 @@ describe("protected Telegram operations", () => {
   it("supports the unlock/approve flow and never executes the submitted code as text", async () => {
     const f = fixture();
     await f.commands.unlock(f.ctx());
+    expect(f.reply.mock.calls).toHaveLength(2);
+    expect(String(f.reply.mock.calls[0][0])).toContain("/lock");
     const message = String(f.reply.mock.calls.at(-1)?.[0]);
+    expect(message).toMatch(/^\/approve [a-f0-9]{16} <6-digit code>$/);
     const id = message.match(/\/approve ([a-f0-9]+)/)?.[1];
     expect(id).toBeTruthy();
     const approvalCtx = f.ctx(`${id} ${f.otp()}`);
     await f.commands.approve(approvalCtx);
+    expect(String(f.reply.mock.calls.at(-1)?.[0])).toContain("/lock");
     expect(approvalCtx.deleteMessage).toHaveBeenCalled();
     await f.commands.up(f.ctx());
     const msg = f.queue.enqueue.mock.calls[0][0];
