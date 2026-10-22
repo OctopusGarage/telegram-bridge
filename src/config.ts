@@ -27,6 +27,23 @@ const envSchema = z.object({
   GLOBAL_RATE_LIMIT_MS: z.coerce.number().int().positive().default(500),
   ALLOWED_RUN_PATTERNS: z.string().default(""),
   ALLOWED_CWD_ROOTS: z.string().default(""),
+  TOTP_SECRET: z.preprocess(
+    (v) => (v === "" ? undefined : v),
+    z
+      .string()
+      .regex(/^[A-Z2-7]{32,128}$/)
+      .optional(),
+  ),
+  ALLOWED_TMUX_SESSIONS: z.string().default(""),
+  AUTH_SESSION_TTL_SECONDS: z.coerce.number().int().min(30).max(900).default(300),
+  AUTH_APPROVAL_TTL_SECONDS: z.coerce.number().int().min(15).max(120).default(60),
+  TMUX_SOCKET: z.preprocess(
+    (v) => (v === "" ? undefined : v),
+    z
+      .string()
+      .regex(/^[a-zA-Z0-9_-]+$/)
+      .optional(),
+  ),
 });
 
 const intOr = (v: unknown, fallback: number): number => {
@@ -38,6 +55,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = envSchema.parse(env);
 
   return {
+    security: {
+      totpSecret: parsed.TOTP_SECRET,
+      allowedSessions: [
+        ...new Set(
+          (parsed.ALLOWED_TMUX_SESSIONS || parsed.TMUX_SESSION)
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
+        ),
+      ],
+      grantTtlMs: parsed.AUTH_SESSION_TTL_SECONDS * 1000,
+      approvalTtlMs: parsed.AUTH_APPROVAL_TTL_SECONDS * 1000,
+      tmuxSocket: parsed.TMUX_SOCKET,
+    },
     botToken: parsed.BOT_TOKEN,
     tmuxTarget: {
       session: parsed.TMUX_SESSION,

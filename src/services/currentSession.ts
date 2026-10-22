@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -18,13 +19,27 @@ export class CurrentSessionManager {
   private cache: string | null = null;
   private readonly filePath: string;
   private readonly fallbackLegacy: boolean;
+  private readonly scoped = new Map<string, CurrentSessionManager>();
 
   constructor(dir: string = appStateDir()) {
     this.filePath = path.join(dir, CURRENT_SESSION_FILE);
     this.fallbackLegacy = dir === appStateDir();
   }
 
-  async get(): Promise<string | null> {
+  private forScope(scope: string): CurrentSessionManager {
+    let manager = this.scoped.get(scope);
+    if (!manager) {
+      const hash = createHash("sha256").update(scope).digest("hex");
+      manager = new CurrentSessionManager(
+        path.join(path.dirname(this.filePath), "selections", hash),
+      );
+      this.scoped.set(scope, manager);
+    }
+    return manager;
+  }
+
+  async get(scope?: string): Promise<string | null> {
+    if (scope) return this.forScope(scope).get();
     if (this.cache !== null) return this.cache;
     let value = readSessionFile(this.filePath);
     if (value === null && this.fallbackLegacy) {
@@ -38,7 +53,8 @@ export class CurrentSessionManager {
     return this.cache;
   }
 
-  async set(sessionName: string): Promise<void> {
+  async set(sessionName: string, scope?: string): Promise<void> {
+    if (scope) return this.forScope(scope).set(sessionName);
     await fs.promises.mkdir(path.dirname(this.filePath), { recursive: true });
     await fs.promises.writeFile(this.filePath, sessionName, "utf-8");
     this.cache = sessionName;

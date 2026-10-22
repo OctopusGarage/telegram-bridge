@@ -143,6 +143,9 @@ else
 fi
 
 info "Installing dependencies..."
+if [ -f "$CONFIG_PATH" ]; then
+  chmod 600 "$CONFIG_PATH"
+fi
 cd "$INSTALL_DIR"
 # --ignore-scripts: prod deployments don't need lifecycle scripts. In particular
 # the "prepare" script runs husky (a devDependency, absent under --prod, and
@@ -156,6 +159,10 @@ cat >"$BIN_DIR/telegram-bridge" <<EOF_RUNNER
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$INSTALL_DIR"
+if [ "\${1:-}" = "security" ]; then
+  shift
+  exec "$NODE_BIN" "$INSTALL_DIR/dist/security-cli.js" "\$@"
+fi
 exec "$NODE_BIN" "$INSTALL_DIR/dist/index.js" "\$@"
 EOF_RUNNER
 chmod +x "$BIN_DIR/telegram-bridge"

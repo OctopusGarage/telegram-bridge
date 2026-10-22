@@ -9,6 +9,22 @@ const base = {
 };
 
 describe("loadConfig", () => {
+  it("enables second-factor security with the default session as its access scope", () => {
+    expect(loadConfig(base).security).toMatchObject({
+      allowedSessions: ["default"],
+      grantTtlMs: 300_000,
+      approvalTtlMs: 60_000,
+    });
+    expect(
+      loadConfig({
+        ...base,
+        ALLOWED_TMUX_SESSIONS: "work,dev,work",
+        AUTH_SESSION_TTL_SECONDS: "90",
+      }).security,
+    ).toMatchObject({ allowedSessions: ["work", "dev"], grantTtlMs: 90_000 });
+    expect(() => loadConfig({ ...base, TOTP_SECRET: "invalid" })).toThrow();
+    expect(() => loadConfig({ ...base, AUTH_SESSION_TTL_SECONDS: "999999" })).toThrow();
+  });
   it("fills defaults for omitted optionals and parses ids", () => {
     const cfg = loadConfig({
       ...base,

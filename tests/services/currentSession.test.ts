@@ -8,6 +8,15 @@ const TEST_DIR = path.join(os.tmpdir(), "test_current_session");
 const TEST_FILE = path.join(TEST_DIR, ".current_tmux_session");
 
 describe("CurrentSessionManager", () => {
+  it("keeps user/chat selections independent across restart", async () => {
+    const mgr = new CurrentSessionManager(TEST_DIR);
+    await mgr.set("work", "user-one:chat-one");
+    await mgr.set("dev", "user-two:chat-two");
+    const restarted = new CurrentSessionManager(TEST_DIR);
+    expect(await restarted.get("user-one:chat-one")).toBe("work");
+    expect(await restarted.get("user-two:chat-two")).toBe("dev");
+    expect(await restarted.get("unknown")).toBeNull();
+  });
   beforeEach(() => {
     try {
       fs.rmSync(TEST_DIR, { recursive: true });
