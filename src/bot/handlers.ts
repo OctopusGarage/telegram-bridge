@@ -703,8 +703,10 @@ export function registerHandlers(rawBot: Bot, deps: HandlerDeps): void {
       ctx,
       `Authorize terminal access to ${session} for ${Math.ceil(deps.config.security!.grantTtlMs / 1000)}s.\n` +
         `Anyone controlling this Telegram account can operate this session during that period.\n` +
-        `Request expires in ${Math.ceil(deps.config.security!.approvalTtlMs / 1000)}s.\n/approve ${request.id} <6-digit code>`,
+        `Request expires in ${Math.ceil(deps.config.security!.approvalTtlMs / 1000)}s.\n` +
+        "Copy the next message and replace <6-digit code> with your authenticator code.",
     );
+    await safeReply(ctx, `/approve ${request.id} <6-digit code>`);
   });
 
   bot.command("approve", async (ctx) => {
@@ -745,7 +747,7 @@ export function registerHandlers(rawBot: Bot, deps: HandlerDeps): void {
   bot.command("help", async (ctx) => {
     await safeReply(
       ctx,
-      "/unlock [session] — request authenticator verification\n" +
+      "/unlock [session] — request verification and a separate approval command to copy\n" +
         "/approve <request-id> <code> — approve one request\n" +
         "/lock — revoke your authorizations\n" +
         "/peek [session] — capture tmux pane text\n" +
